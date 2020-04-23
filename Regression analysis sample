@@ -1,0 +1,237 @@
+#To determine which of the three promotions has the greatest effect on sales, the new offering is introduced in selected geographies.  
+#A single type of promotion is used at each location, and the weekly sales of the new item are recorded for the first five weeks. 
+#
+#Questions / Issues for Analysis#
+#Prepare the data for analysis. Consider the following:
+#  Quantitative versus qualitative data.
+#What should the dependent variable be (weeks 1-5 issues) - possibilities:
+#  Total Sales
+#Average Sales
+#(another manipulation of Sales)
+#Build training and validation data sets.
+#Describe the purpose of building a model to predict Sales. List interested decision-makers. Describe the implications of a better understanding of the predictors for Sales.
+#Run descriptive statistics and graphics on the data.
+#Compute the most highly correlated variable(s) with Sales. Explain whether these correlations make sense or not in the context of this problem.
+#Determine which variables are effective in predicting the Sales. Describe their impact.
+#Selecting a good model for predicting Sales as a function of the promotion type and the other variables. Assess how well the selected linear model found performs in predicting Sales.
+#Discuss the effectiveness of the chosen linear regression model for predicting the Sales on a new data set.
+#Compare the chosen linear model found to the "all-variables-in" linear model.
+#Consideration of higher-order/more complex models using these variables to predict Sales.
+#Overall assessment of the confidence in using this data and the chosen models in the future (for practical use).
+###############
+#
+# Data Dictionary: Promotional Campaign Effectiveness#
+# Qualitative - MarketID - Identifier for market (1 - 10)
+#install.packages('dummies')
+library(dummies)
+library(ggplot2)
+
+dat=read.csv('~~~promo_study_288_fe_s20.csv')
+str(dat)
+names(dat)
+length(names(dat))# There are 7 variables.
+
+# Quanlitative variables: "Market","Msize", "Promo" & "Week".
+# Quantitative varuabkes: "Age"  & "Sales".
+# Store location ID is useless for modeling.
+
+
+length(levels(as.factor(dat$Market))) # 10 different market ID#.
+summary(dat$Market)
+dummymarID = dummy(dat$Market, drop=F)# Creat dummy variables for market ID.
+head(dummymarID)
+tail(dummymarID,10) #685 rows.
+
+summary(dat$Msize)# 3 levels of market sizes.
+dummysizes = dummy(dat$Msize, drop=F)# Creat dummy variables for sizes.
+head(dummysizes)
+tail(dummysizes,10)#685 rows.
+
+summary(dat$Promo)# 3 different promotion types.
+dummypromo = dummy(dat$Promo, drop=F)# Creat dummy variables for sizes.
+head(dummypromo)
+tail(dummypromo,10)
+
+summary(dat$Week)# 5 different weeks.
+dummywk = dummy(dat$Week, drop=F)# Creat dummy variables for sizes.
+head(dummywk)
+tail(dummywk,10)
+
+names(dat)
+dt=dat[ ,c(7,4)] #remove the 'Market' & 'Msize' & 'Store', 'Promo' & 'Week'.
+names(dt)
+
+dt = cbind(dt,dummysizes, dummymarID, dummypromo, dummywk )#Add the dummy variables created previously.
+names(dt)
+length(names(dt)) # now there are 23 variables.
+# N/A- - LocationID - Identifier for store location
+# Quantitative - AgeOfStore - Age of store in years (1 - 28)
+# Qualitative - Promotion - Promotion tested (1, 2, 3)
+# Qualitative - Week- Week of promotion (1 - 5)
+# Quantitative - Sales - Sales amount for a specific store location, promotion and week in thousands of dollars
+
+##########################################
+#dat is the orginal data set.
+#dt is the edited data set with dummy variables added.
+##########################################
+#Q1 The dependent variable could be weekly sales on weeks x, total sales over x weeks.
+#Weekly sales can be predicted based on market size, promotion type, week number, etc.
+#Total sales can be added by individual weekly sales.
+
+
+#Q2 Build training and validation data sets. 60%->Training data, 40%->Testing data.
+set.seed(6356)
+tail(dt,1)
+m <- round(685*0.6,0)
+train <- sample(1:nrow(dt),m) 
+dt.train <- dt[train,] #411 rows.
+dt.test <- dt[-train,] #274 rows.
+
+
+
+#Q3 To predict the weekly sales and make sure the ROI of promotion can be maximized by picking up the ideal stores.
+# Store characters including market, age, size and week number. 
+# Besides, to understand the impact of promotion type is also important.Different promotion types might have different impact to different stores.
+# ROI optimizaion is to find the best combinations from all the stores and promotion types.
+
+
+
+#Q4
+str(dat)
+summary(dat)
+boxplot(Sales~Msize, data=dat) #Large size stores have higher sales. Medium size stores performed badly.
+boxplot(Sales~Promo, data=dat) #Promotion type 2 seems like the worst one.
+abline(line(y=dat$Sales, x=dat$Age)) # Age is not a good predictor here, the trend is flat.
+
+summary(dat$Week)
+dat$Market = as.factor(dat$Market)
+dat$Promo = as.factor(dat$Promo)
+
+names(dat)
+pm = ggplot(data=dat, aes(x=Promo, y=Sales))
+pm + geom_boxplot(size=1,alpha=0.3,fill='lightblue')+xlab('Promotion Type')+ylab('Weekly Sales')+ ylim(0,150)+geom_jitter(aes(colour=Msize),alpha=0.8)
+# Boxplot for each promotion type.
+# Showing large stores have better performance, medium size has the worst sales. Promotion 2 did not work out well.
+
+m = ggplot(data=dat, aes(x=Week, y=Sales, colour=Market, shape=Promo))
+m + geom_point(size=I(3), alpha=0.8) #Weekly sales for each size, week, market and promotion type.
+# Showing Market 3 is a ideal market, market 7 and 1 are not good. Market 7 is not a good fit for promotion type 2.
+
+bm = ggplot(data=dat, aes(x=Market, y=Sales, colour=Promo))
+bm + geom_boxplot(aes(fill=Promo))+xlab('Market ID')+ylab('Weekly Sales')+ ylim(0,150) +facet_grid(Week~Msize, scales='free')# Weekly sales for each size, week and market.
+# Showing large size stores perform well. Promotion type 2 is probable not a good approach.
+
+##dt.train <- dt[train,] #411 rows.
+##dt.test <- dt[-train,] #274 rows.
+
+#Q5
+# Calculate correlation with training data set, dt.train.
+str(dt.train)
+cor(dt.train)[,1]
+sort(abs(round(cor(dt.train)[,1]*100,2)), decreasing = T) #Market 3,size medium,size large, market 6 and market 1 are highly related to sales.
+# Age and size small have weak correlation. We can tell from age that there is very limited impact caused by customer loyalty.
+# Week number also has weak correlation, that means sales are evenly spread out.
+
+
+
+#Q6
+reg1.alldata = lm(Sales~., data=dt)# Set up a model covers all variables with all data.
+reg1.all.sum=summary(reg1.alldata) #Multiple R-squared:  0.8266,	Adjusted R-squared:  0.8224.
+# Some market ID and promotion types are strong predictors, week number along with age and size of the store are not significant at alpha=0.05.
+# If the store is in market 1, it would have 18.13 less weekly sales comparing to week 4, 9 and 10.
+# If the store is in market 3, it would have 31.01 more weekly sales comparing to week 4, 9 and 10.
+# Week 5 seems like to have the highest weekly sales since all week 1-4 have negative coefficients, three of them are significant at alpha=0.05.
+# Promotion 1 addes 4.90 more and promotion 2 reduces 5.59 for weekly sales comparing to promotion type 3, both are significant at alpha=0.05.
+
+reg1.traindata = lm(Sales~., data=dt.train)# Set up a model covers all variables with the training data set.
+reg1.train.sum=summary(reg1.traindata) # Multiple R-squared:  0.826,	Adjusted R-squared:  0.819.
+# Some market ID and promotion types are strong predictors, week number along with age and size of the store are not significant at alpha=0.05.
+# If the store is in market 1, it would have 18.65 less weekly sales comparing to week 4, 9 and 10.
+# If the store is in market 3, it would have 30.17 more weekly sales comparing to week 4, 9 and 10.
+# Week 5 seems like to have the highest weekly sales since all week 1-4 have negative coefficients, three of them are significant at alpha=0.05.
+# Promotion 1 addes 5.90 more and promotion 2 reduces 4.79 for weekly sales comparing to promotion type 3, both are significant at alpha=0.05.
+
+
+reg12.alldata = lm(Sales~.-MsizeSmall-Market4-Market9-Market10-Promo3-Week5, data=dt) # Removed those redundant variables, and have the same model.
+reg12.all.sum=summary(reg12.alldata) #Multiple R-squared:  0.8266,	Adjusted R-squared:  0.8224.
+
+reg12.traindata = lm(Sales~.-MsizeSmall-Market4-Market9-Market10-Promo3-Week5, data=dt.train) # Removed those redundant variables, and have the same model.
+reg12.train.sum=summary(reg2.traindata) #Multiple R-squared:  0.826,	Adjusted R-squared:  0.819.
+
+
+
+#Q7
+regpromo.alldata = lm(Sales~.-MsizeSmall-Market4-Market8-Week1-Week2-Week3-Week4-Market9-Market10-Promo3-Age-MsizeLarge-MsizeMedium-Market5-Week5, data=dt) 
+regpromo.all = summary(regpromo.alldata) #Multiple R-squared:  0.8016,	Adjusted R-squared:  0.7996.
+# This model is a function of promotion type 1 and 2 with market 1,2,3,6,7. All coefficients are significant at alpha=0.05.
+
+#Creating the model with training data with the variables picked up.
+regpromo.traindata = lm(Sales~.-MsizeSmall-Market4-Market8-Week1-Week2-Week3-Week4-Market9-Market10-Promo3-Age-MsizeLarge-MsizeMedium-Market5-Week5, data=dt.train) 
+# Removed those redundant variables along with large and medium sizes, age and market 5 (were not significant from previous model).
+regpromo.train.sum = summary(regpromo.traindata)
+
+#Testing the model with test data to predict the sales
+TSS.test = sum((dt.test$Sales - mean(dt.test$Sales))^2)
+TSS.test #TSS=92269.74
+
+yhat.test.modelpromo = predict(regpromo.traindata, dt.test)
+
+resid.test.modelpromo = dt.test$Sales - yhat.test.modelpromo
+RSS.test.modelpromo = sum(resid.test.modelpromo^2)
+RSQpromo = 1 - RSS.test.modelpromo/TSS.test
+RSQpromo # RSQpromo=0.7725502
+RSQpromo - regpromo.train.sum$r.squared # Difference is -0.04047647 = -4%..
+# Which means the model performs well with predicting the sales with test data set.
+
+
+
+#Q8 
+##Testing the all-variable-in model with test data to predict the sales, reduantant variables excluded.
+yhat.test.model12 = predict(reg12.traindata, dt.test)
+
+resid.test.model12 = dt.test$Sales - yhat.test.model12
+RSS.test.model12 = sum(resid.test.model12^2)
+RSQ12 = 1 - RSS.test.model12/TSS.test
+RSQ12 # RSQ12=0.8069615
+RSQ12 - reg12.train$r.squared # RSQ12=0.8069615, difference is -0.0190589= -1.9%
+# Which means the model performs well with predicting the sales with test data set.
+
+
+
+#Q9
+#Comparing the linear model in Q7 and the all variables in model in Q6.
+anova(regpromo.traindata, reg12.traindata)
+# P = 0.0007483 ***
+#H0: both models are the same
+#Ha: Model with more variables is better
+#Since P is small enough to reject H0, we should choose the bigger model (reg12.traindata).
+
+
+
+#Q10
+
+round(tail(reg12.train.sum$coefficients[,1], 4),1)+3.4
+#Standradized values for each week:
+#Week1        Week2       Week3       Week4      Week5
+#0.8           0.8         0.3          0         3.4
+#There is a possible trend that week 5 always has the best performance.Similar to seasonality, the last week of the month always performs the best.
+
+
+ggplot()+ geom_line(data=dat, aes(x=Age,y=Sales, color=Promo))
+#Well, not a clear trend can be visulazied.
+
+
+######################current data set is not fit fortime seris analysis######################
+#Analyzing seasonality, trend with the original data set, dat.
+#library(seasonal)
+##
+#tail(dat)
+#typeof(dat$Week)
+#?ts
+#dt.seasonal= ts(dat[ ,7], start = 1,end=5, frequency = 5 ) #7th column = "Sales", frequency=5
+#summary(dt.seasonal)
+#str(dt.seasonal)
+#autoplot(dt.seasonal)
+#ggseasonplot(dt.seasonal)+  ggtitle('Weekly Sales')+
+# ylab('Sales')+xlab('Week')
+##############################################################################################################
