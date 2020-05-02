@@ -1,0 +1,540 @@
+---
+title: "hw3_zhang_yujie"
+author: "Yujie Zhang"
+date: "4/30/2020"
+output: html_document
+---
+
+Q1,'atemp', 'temp' & 'yr' have high corelation with 'cnt'.
+It seems like people may want to rent the bikes based on the temp. Also people are getting used to this type of business, which could presented by yr.
+```{r}
+bike = read.csv(file.choose())
+head(bike) #The data is daily data over two years (731 observations).  
+names(bike) #14 variables.  atemp=Normalized feeling temperature in Celsius.
+str(bike)
+bike$dteday = as.Date(bike$dteday, '%m/%d/%Y')
+corbike = bike [ , c(-1,-2)]
+sort(abs(cor(corbike)[ , 12]), decreasing = T) #check correlations
+
+```
+
+Q2, Create dummy variables for 'season', 'yr', 'month', 'weekday' & 'weathersit'.
+Add squared time trend value of year, 'yr_sqd'.
+Run regression without ID. The model shows the 'yr_sqd' is not a good predictor, the 'yr' is siginificant.
+
+
+```{r}
+str(bike)
+bike1 = bike[ ,c(-2,-3,-5:-9) ] #Keep yr as time trend variable.
+bike1['yr_sqd'] = bike$yr ^2 #Add yr_sqd.
+
+library(dummies)
+str(bike)
+str(bike) #dummy variables needed for 'season', 'month', 'weekday' & 'weathersit'.
+
+bike_season = dummy(bike$season)#Creat dummy variables for season.
+colnames(bike_season) = c('Winter', 'Spring', 'Summer', 'Fall')
+head(bike_season)
+
+bike_month = dummy(bike$mnth) #Creat dummy variables for month.
+colnames(bike_month) = c('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov','Dec')
+summary(bike_month)
+
+bike_weekday = dummy(bike$weekday) #Creat dummy variables for weekday.
+colnames(bike_weekday) = c('Sun', 'Mon', 'Tue', 'Wed', 'Tur', 'Fri', 'Sat')
+head(bike_weekday)
+
+bike_weathersit = dummy(bike$weathersit) #Creat dummy variables for weathersit.
+colnames(bike_weathersit) = c('Clear_Cloudy', 'Mist_Cloudy','Light_Snow_Rain')
+head(bike_weathersit)
+
+df_bike_reg = cbind( bike1, bike_season, bike_month, bike_weekday, bike_weathersit) #Combined with dummy variables.
+```
+
+
+
+
+Q3.Months and seasons could show the seasonality. Comparing to Dec, Sep has the best performance, +1125.06.
+Fall is the best season among all. Winter is the worst, with -1624.59 sales comparing to Fall.
+Coefficients: (5 not defined because of singularities)
+                  Estimate Std. Error t value Pr(>|t|)    
+(Intercept)        1479.13     362.37   4.082 4.98e-05 ***
+yr                 2021.00      58.62  34.477  < 2e-16 ***
+hum               -1520.05     294.42  -5.163 3.17e-07 ***
+windspeed         -2804.55     417.36  -6.720 3.76e-11 ***
+Winter            -1624.59     181.61  -8.945  < 2e-16 ***
+Spring             -734.02     213.33  -3.441 0.000614 ***
+Summer             -774.78     192.44  -4.026 6.29e-05 ***
+Mar                 687.59     185.60   3.705 0.000228 ***
+Apr                 579.22     243.48   2.379 0.017628 *  
+May                 875.18     259.34   3.375 0.000780 ***
+Jun                 681.42     264.37   2.577 0.010155 *  
+Aug                 608.22     270.89   2.245 0.025061 *  
+Sep                1125.06     220.58   5.101 4.36e-07 ***
+Oct                 605.15     164.63   3.676 0.000255 ***
+Sun                -440.49     107.29  -4.105 4.51e-05 ***
+Mon                -312.45     107.19  -2.915 0.003670 ** 
+Clear_Cloudy       1947.74     198.33   9.821  < 2e-16 ***
+Mist_Cloudy        1488.27     185.72   8.014 4.64e-15 ***
+```{r}
+tail(df_bike_reg)
+str(df_bike_reg)
+
+reg1 = lm(cnt~.-dayID, data = df_bike_reg, na.action=na.exclude) #run linear regression without ID.
+summary(reg1) # Multiple R-squared:  0.8461,	Adjusted R-squared:  0.8401. RSQ = 84.61%.
+```
+
+
+Q4, Both models below are weaker than the previous one, RSQ and Adj.RSQ decreased.
+The 'month' model is better than the 'season' one, with higher RSQ and Adj.RSQ.
+'yr', 'Jan', 'Feb', 'Apr' thru 'Nov' all siginificant.
+April thru Novemember had much better performance. March and Decemeber are the two ok months, the corners.
+And June thru September are the best months.So yes, there is a strong seasonality.
+
+```{r}
+names(df_bike_reg)
+reg2_month = lm(cnt~+yr+yr_sqd+Jan+Feb+Mar+Apr+May+Jun+Jul+Aug+Sep+Oct+Nov+Dec, data = df_bike_reg, na.action=na.exclude) #run linear regression with time, time_sqd and monthly indicators
+summary(reg2_month) # Multiple R-squared:  0.7133,	Adjusted R-squared:  0.7085. RSQ = 71.33%.
+
+reg3_season = lm(cnt~+yr+yr_sqd+Winter+Spring+Summer+Fall, data = df_bike_reg, na.action=na.exclude) #run linear regression with time, time_sqd and monthly indicators
+summary(reg3_season) # Multiple R-squared:  0.6697,	Adjusted R-squared:  0.6679. RSQ = 66.97%..
+```
+
+
+
+Q5, Found a model with 15 variables below, which is the best model so far, reg7_preferred.
+For weather conditions: higher temp, lower hum and lower windspeed boost the rentals.
+For month indicators: Sep and Oct are the best months.
+For time trend: people are getting used to use rental bikes over time.
+                Estimate Std. Error t value Pr(>|t|)    
+(Intercept)      2649.88     277.09   9.563  < 2e-16 ***
+temp             4800.84     282.35  17.003  < 2e-16 ***
+hum             -1665.60     286.34  -5.817 9.04e-09 ***
+windspeed       -2903.96     403.65  -7.194 1.59e-12 ***
+Winter          -1120.01     112.33  -9.971  < 2e-16 ***
+Fall              333.12     107.35   3.103 0.001991 ** 
+Mar               388.21     109.09   3.559 0.000398 ***
+May               348.40     114.32   3.047 0.002393 ** 
+Jul              -478.19     122.25  -3.911 0.000100 ***
+Sep               660.96     114.20   5.788 1.07e-08 ***
+Oct               539.17     127.14   4.241 2.52e-05 ***
+Sun              -367.99      83.60  -4.402 1.24e-05 ***
+Mon              -249.31      83.23  -2.995 0.002836 ** 
+Clear_Cloudy      437.25      77.06   5.674 2.02e-08 ***
+Light_Snow_Rain -1521.43     184.49  -8.247 7.79e-16 ***
+yr_sqd           2007.11      58.30  34.426  < 2e-16 ***
+Multiple R-squared:  0.8428,	Adjusted R-squared:  0.8395.
+
+
+```{r}
+summary(reg1)
+library(leaps)
+ncol(df_bike_reg) #There are 34 columns.
+reg1_full = regsubsets(cnt~.,data = df_bike_reg, nvmax=33) #Max is 34-1 =33 variables. 5 linear dependencies found.
+summary(reg1_full) #5 linear dependencies found..
+```
+Q5.              Estimate Std. Error t value Pr(>|t|)    
+(Intercept)      2649.88     277.09   9.563  < 2e-16 ***
+temp             4800.84     282.35  17.003  < 2e-16 ***
+hum             -1665.60     286.34  -5.817 9.04e-09 ***
+windspeed       -2903.96     403.65  -7.194 1.59e-12 ***
+Winter          -1120.01     112.33  -9.971  < 2e-16 ***
+Fall              333.12     107.35   3.103 0.001991 ** 
+Mar               388.21     109.09   3.559 0.000398 ***
+May               348.40     114.32   3.047 0.002393 ** 
+Jul              -478.19     122.25  -3.911 0.000100 ***
+Sep               660.96     114.20   5.788 1.07e-08 ***
+Oct               539.17     127.14   4.241 2.52e-05 ***
+Sun              -367.99      83.60  -4.402 1.24e-05 ***
+Mon              -249.31      83.23  -2.995 0.002836 ** 
+Clear_Cloudy      437.25      77.06   5.674 2.02e-08 ***
+Light_Snow_Rain -1521.43     184.49  -8.247 7.79e-16 ***
+yr_sqd           2007.11      58.30  34.426  < 2e-16 ***
+Multiple R-squared:  0.8428,	Adjusted R-squared:  0.8395.
+
+For weather conditions: higher temp, lower hum and lower windspeed boost the rentals.
+For month indicators: Sep and Oct are the best months.
+For time trend: people are getting used to use rental bikes over time.
+
+Q5.Checking RSQ:
+```{r}
+which.max(summary(reg1_full)$rsq) #Highest RSQ = 28
+summary(reg1_full)$rsq
+```
+Q5.Without the 5NA variables, to use all the variables could get the highest RSQ, which is true but not helpful.
+
+Q5.Checking AdjRSQ, CP and BIC:
+```{r}
+plot(summary(reg1_full)$rsq)
+which.max(summary(reg1_full)$rsq) #Highest RSQ = 28
+
+plot(summary(reg1_full)$adjr)
+which.max(summary(reg1_full)$adjr) #Highest AdjRSQ = 22
+
+plot(summary(reg1_full)$cp)
+which.min(summary(reg1_full)$cp) #Lowest CP = 18
+
+plot(summary(reg1_full)$bic)
+which.min(summary(reg1_full)$bic) #Lowest BIC = 14
+```
+Q5.So 14-22 variables should be good.
+
+Q5.Going to pick up 15 variables to try.
+```{r}
+reg1_fwd = regsubsets(cnt~.-dayID, data = df_bike_reg, nvmax = 22, method = "forward")
+summary(reg1_fwd)
+plot(summary(reg1_fwd)$rsq, ylim=c(0.6,1)) #15 variables could be a good model.
+reg1_fwd_sum = summary(reg1_fwd)
+round(reg1_fwd_sum$rsq*100,1) #15 variables could be a good model.
+reg1_fwd_sum$which[15,] #Find those 15 variables. 
+```
+
+```{r}
+reg1_fwd_sum$outmat[15,]
+```
+
+Q5.Building up a new model with those 15 variables:
+```{r}
+reg5_preferred = lm(cnt~atemp+hum+windspeed+yr_sqd+Winter+Fall+Mar+May+Jul+Sep+Oct+Sun+Mon+Clear_Cloudy+Light_Snow_Rain,     data=df_bike_reg)
+
+summary(reg5_preferred) #Multiple R-squared:  0.842,	Adjusted R-squared:  0.8387.
+#Comparing to reg1 has all the variables, thie model has slighly lower RSQ and Adj.RSQ.
+# reg1: Multiple R-squared:  0.8461,	Adjusted R-squared:  0.8401. RSQ = 84.61%.
+```
+Q5.1.All variables in this model are significant
+   2.It fits quite well, since the R squared is around 84.2% which is a very good indication of this model’s ability to explain        variability in Salary.
+
+Q5.Now test it with the bigger model, reg1:
+```{r}
+anova(reg5_preferred, reg1)
+#H0: both models are the same
+#Ha: Model with more variables is better
+#Since P is not small enough to reject H0, we should choose the small model (reg5_preferred).
+```
+H0: both models are the same
+Ha: Model with more variables is better
+Since P=0.1001 is not small enough to reject H0, we should choose the small model (reg5_preferred).
+
+
+
+Q6, Create a (new) time series object from the count (cnt) with frequency 7.  
+
+```{r}
+library(fpp2)
+ts_bike = ts(bike[, 14], start = 2011, frequency = 365)
+```
+
+```{r}
+autoplot(ts_bike) +
+  ggtitle('Weekly rental bike count Jan.2011 - Dec.2012') +
+  ylab('Count of weekly rental bikes') +
+  xlab('Year')
+```
+Q6. This chart showing some seasonality.
+
+```{r}
+ggseasonplot(ts_bike, year.labels=TRUE) +
+    ylab("Count of weekly rental bikes") +
+  xlab("Week")+
+  ggtitle("Weekly rental bike count Jan.2011 - Dec.2012") #clear trends for both years.
+```
+Both years have the similar trends.The seasonality is showing in the chart clearly, more bikes rented in the middle of the years.
+
+```{r}
+acf(ts_bike, plot=T) #There might be a period of each 4 obs.
+```
+Q6. This chart shows significant autocorrelation.
+
+```{r}
+length(ts_bike)
+cor(ts_bike[-731], ts_bike[-1]) #t-1: 0.8485883 high
+cor(ts_bike[-(730:731)], ts_bike[-(1:2)]) #t-2: 0.7846226 high
+cor(ts_bike[-(728:731)], ts_bike[-(1:4)]) #t-4: 0.7456483 high
+
+par(mfrow=c(1,3))
+plot(x=ts_bike[-731], y=ts_bike[-1]) #t-1 shows the best fit and trend.
+plot(x=ts_bike[-(730:731)], y=ts_bike[-(1:2)])
+plot(x=ts_bike[-(728:731)], y=ts_bike[-(1:4)])
+```
+Q6. The left chart shows the stronger corelation over all, which is the t-1 period.
+
+
+
+Q7. 3-period moving average model:
+```{r}
+library(forecast)
+summary(ts_bike)
+length(ts_bike)
+
+#3-period
+ma3 = ma(ts_bike, 3)
+res3 = ts_bike[2:730] - ma3[2:730]
+
+MSE_3 = mean(res3^2)
+MSE_3 #325407.5
+RMSE_3=sqrt(MSE_3) 
+RMSE_3 #570.445
+```
+Q7. RMSE for 3-period moving average = 570.445.
+
+Q7. Checking other MA models:
+```{r}
+#5-period
+ma5 = ma(ts_bike, 5)
+res5 = ts_bike[3:729] - ma5[3:729]
+
+MSE_5 = mean(res5^2)
+MSE_5 #500691.4
+RMSE_5 = sqrt(MSE_5) #707.5955
+
+#7-period
+ma7 = ma(ts_bike, 7)
+res7 = ts_bike[4:728] - ma7[4:728]
+
+MSE_7 = mean(res7^2)
+MSE_7 #631982.9
+RMSE_7 = sqrt(MSE_7) #794.9735
+```
+Ma3: RMSE=570.445
+Ma5: RMSE=707.5955
+Ma7: RMSE=794.9735
+3-period moving average has the lowest RMSE.
+
+
+```{r}
+autoplot(ts_bike, series = 'Weekly Rental') +
+  autolayer(ma3, series = '3-period') +
+  autolayer(ma5, series = '5-period') +
+  autolayer(ma7, series = '7-period') +
+  ggtitle('Weekly rental bike count Jan.2011 - Dec.2012') + 
+  xlab('Year') + ylab('Weekly rental count')
+
+p1=autoplot(ts_bike, series = 'Weekly Rental') +
+  autolayer(ma3, series = '3-period') +
+  ggtitle('Weekly rental bike count Jan.2011 - Dec.2012') + 
+  xlab('Year') + ylab('Weekly rental count')
+p2=autoplot(ts_bike, series = 'Weekly Rental') +
+  autolayer(ma5, series = '5-period') +
+  ggtitle('Weekly rental bike count Jan.2011 - Dec.2012') + 
+  xlab('Year') + ylab('Weekly rental count')
+p3=autoplot(ts_bike, series = 'Weekly Rental') +
+  autolayer(ma7, series = '7-period') +
+  ggtitle('Weekly rental bike count Jan.2011 - Dec.2012') + 
+  xlab('Year') + ylab('Weekly rental count')
+
+library(gridExtra)
+grid.arrange(
+  p1,p2,p3, nrow=3
+)
+```
+ Q7. 3-period moving average shows the best fit.
+ However, it might be capturing too much info from seasonality or noises, the 7-period MA will be chosen.
+
+
+
+Q8, Compute the STL decomposition.  
+```{r}
+ts_bike_stl = stl(ts_bike, t.window = 7, s.window = "periodic", 
+               robust = TRUE)
+
+autoplot(ts_bike_stl) +
+  ggtitle('Weekly rental bike count Jan.2011 - Dec.2012') + 
+  xlab('Year')
+```
+
+
+Q8. Compute the STL decomposition.  
+T:
+```{r}
+#    Yt = Tt + St + Rt
+#      Yt = Sales at time t
+#      Tt = Trend at time t
+#      St = Seasonal Effect at time t
+#      Rt = Remainder at time t  
+
+ts_bike_noT = ts_bike - ma7 #Ma3 used for decomposing time series
+
+autoplot(ts_bike)+
+  autolayer(ts_bike_noT)+
+  ggtitle('Weekly rental bike count Jan.2011 - Dec.2012')+
+  ylab('Weekly Cnt') + xlab('Year')
+```
+Q8. Data with & without trend.
+
+Q8. S: seasonality over weeks:
+```{r}
+library(dplyr)
+ts_bike_not_df = as.data.frame(ts_bike_noT) #create a df to capture seaonal component
+ts_bike_not_df[c(1:3, 729:731),] = 0
+ts_bike_not_df['weekday'] = bike$weekday
+week_num = rep((1:105), each = 7, length.out = 731) #add week_number
+ts_bike_not_df['week_num'] = week_num
+head(ts_bike_not_df)
+tail(ts_bike_not_df)
+nrow(ts_bike_not_df) #731 rows.
+
+seatot = ts_bike_not_df %>%
+  group_by(week_num) %>%
+  summarise(total = sum(x), count=n())#Total there are 105 weeks, 3 104 weeks.
+seatot['avg'] = seatot$total/seatot$count #Weekly average calculated by sum by group then divided by the count of the weeks.
+seatot$avg #Weekly average cnt for 2 years.
+
+tail(seatot)
+
+bike_S = rep(seatot$avg, each=7, length.out = 731)
+bike_S[c(1:10, 700:731)]
+```
+Q8. Here is the weekly average for two yeasr.
+
+
+
+```{r}
+ts_bike_not_df['weekday'] = NULL #remove the 'weekday' column
+ts_bike_not_df['week_num'] = NULL #remove the 'week_num' column
+
+ts_bike_noT_noS = ts_bike_noT - bike_S #remove the seasonlity for the no_T data.
+head(ts_bike_noT_noS)
+ts_bike_S= ts(bike_S, start = 2011, frequency = 365) #make the S to be time series object.
+
+ggseasonplot(ts_bike_S,)+
+  ggtitle('Weekly effect Jan.2011 - Dec.2012')+
+  ylab('Weekly Cnt') + xlab('Weeks')
+
+ggseasonplot(ts_bike_S, polar = T)+
+  ggtitle('Weekly effect Jan.2011 - Dec.2012')+
+  ylab('Weekly Cnt') + xlab('Weeks')
+```
+Q8. The chart shows the seasonlity of weeks. Similiary seasonlity for both years.
+
+
+```{r}
+autoplot(ts_bike)+
+  autolayer(ts_bike_noT)+
+  autolayer(ts_bike_noT_noS)+
+  ggtitle('Weekly rental bike count Jan.2011 - Dec.2012')+
+  ylab('Weekly Cnt') + xlab('Year')
+```
+Q8. The plot of de-trend and de-seasonality data over two years.
+
+Q8. Now remove both T and S.
+```{r}
+ts_bike_T = ts_bike - ts_bike_noT
+ts_bike_S = ts_bike_noT - ts_bike_noT_noS
+ts_bike_remain = ts_bike_noT_noS
+
+autoplot(ts_bike)+ #plot everythign now
+  autolayer(ts_bike_T)+
+  autolayer(ts_bike_S)+
+  autolayer(ts_bike_remain)+
+  ggtitle('Weekly rental bike count Jan.2011 - Dec.2012')+
+  ylab('Weekly Cnt') + xlab('Year')
+```
+Q8. The chart shows the T, S and Remainder along with the original data.
+
+
+```{r}
+ts_bike_remain[c(1:3, 729:731)] = 0 #Make those first 3 and last 3 NAs zero.
+acf(ts_bike_remain, plot=T) #There might be a period of each 4 obs.
+```
+Q8. Yes, the chart shows autocorrelation with recent periods.
+
+Q8. Compute the RMSE from the remainder series.
+```{r}
+RSS_remain = ts_bike - ts_bike_remain
+MSE_remain = mean(RSS_remain^2, na.rm=T)
+MSE_remain # 23446731
+RMSE_remain = sqrt(MSE_remain) 
+RMSE_remain # 4842.182
+```
+
+
+Q8. Compute measures of the strength of trend and seasonality in the STL decomposition.
+```{r}
+RSS_TR= ts_bike - (ts_bike_remain + ts_bike_S)
+MSE_TR = mean(RSS_TR^2,  na.rm=T)
+MSE_TR # 23529037
+RMSE_TR = sqrt(MSE_TR) 
+RMSE_TR # 4850.674
+F_T = max(0 , 1-(RMSE_remain/RMSE_TR))
+F_T # 0.001750555
+```
+Q8. The FT = 0.001750555, means very weak trend effect.
+
+```{r}
+RSS_SR= ts_bike - (ts_bike_remain + ts_bike_T)
+MSE_SR = mean(RSS_SR^2,  na.rm=T)
+MSE_SR # 29275.99
+RMSE_SR = sqrt(MSE_SR) 
+RMSE_SR # 171.1023
+S_T = max(0 , 1-(RMSE_remain/RMSE_SR))
+S_T #0
+
+```
+Q8. The FS = 0, means very weak or no seasonality effect. Trend effect is stronger than seasonality effect.
+
+```{r}
+ts_bike %>%
+  stl(t.window=7, s.window="periodic", robust=TRUE) %>%
+  autoplot()
+
+```
+Q8. Use STL fuction to test.
+```{r}
+remainder(ts_bike_stl) #This is the remainder from stl function
+
+RSS_remain1 = ts_bike - remainder(ts_bike_stl)
+MSE_remain1 = mean(RSS_remain1^2, na.rm=T)
+MSE_remain1 
+RMSE_remain1 = sqrt(MSE_remain1)
+RMSE_remain1 # 4905.754
+```
+```{r}
+RSS_TR1= ts_bike - (remainder(ts_bike_stl) + seasadj(ts_bike_stl))
+MSE_TR1 = mean(RSS_TR1^2,  na.rm=T)
+MSE_TR1 # 2456225
+RMSE_TR1 = sqrt(MSE_TR1) 
+RMSE_TR1 # 1567.235
+F_T1 = max(0 , 1-(RMSE_remain1/RMSE_TR1))
+F_T1 # 0
+```
+Q8. The FT = 0, means very weak or no seasonality effect.
+
+```{r}
+RSS_SR1= ts_bike - (remainder(ts_bike_stl) + trendcycle(ts_bike_stl))
+MSE_SR1 = mean(RSS_SR1^2,  na.rm=T)
+MSE_SR1 # 2124928
+RMSE_SR1 = sqrt(MSE_SR1) 
+RMSE_SR1 # 1457.713
+S_T = max(0 , 1-(RMSE_remain1/RMSE_SR1))
+S_T #0
+```
+The FS = 0, means very weak or no seasonality effect.
+
+
+
+Q9.	Make predictions for 30 periods ahead using the STL decomposition from above and the naïve forecasting method
+```{r}
+fore_stl = forecast(ts_bike_stl, method = 'naive', robust=T, h=30)
+fore_stl$mean
+autoplot(fore_stl)+
+  ggtitle('Weekly rental bike count Jan.2011 - Dec.2012')+
+  ylab('Weekly Cnt') + xlab('Year')
+```
+
+
+
+Q10. Compare the overall error for the regression model (question 5) to the time series “model” generated in the STL decomposition (question 8).  
+Regression model in question 5
+```{r}
+reg5sum = summary(reg5_preferred)
+summary(reg5_preferred)
+#Residual standard error: 778.1 on 715 degrees of freedom
+#Multiple R-squared:  0.842,	Adjusted R-squared:  0.8387
+```
+
+STL decomposition model in question 8
+```{r}
+ts_bike_stl
+stlsum=summary(ts_bike_stl)
+
+```
