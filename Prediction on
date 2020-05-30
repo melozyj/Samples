@@ -1,0 +1,996 @@
+library(ggplot2)
+library(dplyr)
+library(leaps)
+library(tidyverse)
+library(dummies)
+library(psych)
+library(lattice)
+library(DAAG)
+library(devtools)
+library(usethis)
+library(car)
+library(carData)
+############################
+setwd('D://M////FEMBA//Predeictive Analysis//Project') #Set the WD
+
+#Vision, Vehicle and Factor files are based on individual 
+#  vehicle/drivers for each accident.
+#The final data set will based on all vehicles recorded, 
+#  some individual vehicles (same VIN) might have more than one 
+#  accidents recorded,
+#  but they will be treated separately since the situations, 
+#  conditions and people involved were different.
+#
+#
+#The cleansing work will start with the Vehicle file includes all 
+#  motorist and non-motorist.
+vehicle = read.csv('VEHICLE.csv') #The Vehicle data file includes in-transport 
+#  motor vehicle data as well as driver and precrash data.
+names(vehicle)
+str(vehicle) #51872 obs. of  107 variables.
+nrow(vehicle)#There are 51872 rows.
+
+vehicle$BODY_TYP = as.numeric(vehicle$BODY_TYP)
+vehicle['Veh_ID'] = as.numeric(paste(vehicle$ST_CASE, vehicle$VEH_NO, sep = ""))
+#  Create the 'Veh_ID' by combining 'ST_CASE' & 'VEH_NO' 
+names(vehicle)
+
+v = vehicle[, c(-21:-33, -36:-38, -103:-105)] 
+#Removed VINs for cars and motor carriers.
+#
+nrow(v) #51872 rows now.
+
+tail(v) #now v is the main data referenced by'Veh_ID' 
+#  set to keep adding variables from other files.
+df_v=v
+
+
+#Will capture the info if the vision was obstructed or not from Vision_MVISOBCS
+vision = read.csv("VISION.csv") #The Vision data file identifies each 
+#  visual obstruction (as a separate record).
+names(vision)
+vision['Veh_ID'] = as.numeric(paste(vision$ST_CASE, vision$VEH_NO, sep = ""))
+#  Create the 'Veh_ID' by combining 'ST_CASE' & 'VEH_NO'
+
+vision = vision %>%
+  group_by(Veh_ID) %>%
+  mutate(Vsion_Blocked = min(sum(MVISOBSC),1)) #Check if any obstruction 
+#  recorded, if not, then 0 for that Veh_ID.
+
+tail(vision) #Have the new column added
+vision = vision[ , c(5,6)]
+nrow(vision) 
+vi = distinct(vision)
+nrow(vi) #51872 rows.
+which(v$Veh_ID != vi$Veh_ID) #Same order of Veh_ID for both data sets.
+df_v['Vision_Blocked'] = vi$Vsion_Blocked #Add vision_blocked column 
+#  from vi to v.
+tail(df_v)
+df_v_vi = df_v
+str(df_v_vi) #51872 obs. of 90 variables.
+
+
+#Will capture the info if the vision was obstructed or not from FACTOR_MFACTOR
+factor = read.csv("FACTOR.csv")#The Factor data file identifies each vehicle
+#  factor (as a separate record).
+#
+names(factor)
+factor['Veh_ID'] = as.numeric(paste(factor$ST_CASE, factor$VEH_NO, sep = "")) 
+#  Create the 'Veh_ID' by combining 'ST_CASE' & 'VEH_NO'
+
+f = factor[ , c(5,4,3)]
+
+f = f %>%
+  group_by(Veh_ID) %>% #Group by Veh_ID
+  mutate(Vehicle_Issue= min(sum(MFACTOR),1)) 
+#  Check if any vehicle issues recorded, if not, then 0 for that Veh_ID.
+#
+#
+f = distinct(f[ , c(1,4)])
+nrow(f) #51872 rows left.
+which(f$Veh_ID != df_v_vi$Veh_ID) #Same order of Veh_ID for both data sets.
+df_v_vi['Vehicle_Issue'] = f$Vehicle_Issue #added to the v data set.
+tail(df_v_vi)
+str(df_v_vi) #38781 obs. of  11 variables.
+df_v_vi_f = df_v_vi
+table(df_v_vi_f$Vehicle_Issue)
+str(df_v_vi_f) #48716 obs. of  110 variables.
+
+
+#Will capture the Drunk drivers, County, City, Month, Hour and FATALS from ACCIDENT file.
+accident = read.csv('ACCIDENT.csv') #The Accident data file includes crash data.ST_CASE is the unique case identifier for each record.
+names(accident)
+
+aci = accident[ , c(-1, -10:-14, -16:-17 )]
+df_v_vi_f_a = merge(x=df_v_vi_f, y=aci, by = 'ST_CASE', all.x=T) #Left joined tables
+head(df_v_vi_f_a,4)
+nrow(df_v_vi_f_a) #51872 rwos.
+
+
+#Will capture the DRIMPAIR from DRIMPAIR file. This data element identifies physical impairments to this driver that may have.
+drimpair = read.csv("DRIMPAIR.csv") #This data element identifies physical impairments to this driver that may have.
+head(drimpair)
+drimpair['Veh_ID'] = as.numeric(paste(drimpair$ST_CASE, drimpair$VEH_NO, sep = "")) #Create the 'Veh_ID' by combining 'ST_CASE' & 'VEH_NO'
+
+d = drimpair %>% #physical impairments to this driver that may have contributed to the crash as identified by law enforcement.
+  mutate(Driver_Impairment = ifelse(drimpair$DRIMPAIR %in% c(1:96), 1,0))  #Check if impairments recorded = 1, otherwise =0.
+d
+d=d[, c(5,6)]
+df_v_vi_f_a['Veh_ID'] = as.numeric(paste(df_v_vi_f_a$ST_CASE, df_v_vi_f_a$VEH_NO, sep = ""))
+df_v_vi_f_a_d = merge(x=df_v_vi_f_a, y=d, by = 'Veh_ID', all.x=T) #Left joined tables
+tail(df_v_vi_f_a_d)
+df_v_vi_f_a_d=distinct(df_v_vi_f_a_d)
+nrow(df_v_vi_f_a_d) #52032 rows.
+
+
+#Will capture the P_ from MANEUVER file. This data element identifies identifies each avoidance attempt (as a separate record).
+maneuver = read.csv("MANEUVER.csv")#This data element identifies the attribute that best describes the movements/actions.
+tail(maneuver)
+maneuver['Veh_ID'] = as.numeric(paste(maneuver$ST_CASE, maneuver$VEH_NO, sep = "")) #Create the 'Veh_ID' by combining 'ST_CASE' & 'VEH_NO'
+
+m = maneuver %>%
+  mutate(Driver_avoid = ifelse(maneuver$MDRMANAV %in% c(1:92), 1,0))   #Driver tried to avoid = 1. Driver didnt try or N/A = 0.
+
+m=m[ , c(5,6)]
+
+df_v_vi_f_a_d_m = merge(x=df_v_vi_f_a_d, y=m, by = 'Veh_ID', all.x=T) #Left join tables
+df_v_vi_f_a_d_m = distinct(df_v_vi_f_a_d_m)
+any(is.na(df_v_vi_f_a_d_m)) #No NAs.
+tail(df_v_vi_f_a_d_m)
+str(df_v_vi_f_a_d_m) #551872 obs. of  136 variables.
+
+
+#PERSON contains records for individual persons.
+#create Veh_ID and Person_ID in PERSON file to capture the drivers' info.
+person = read.csv('PERSON.csv') #The Person data file includes motorist and non-motorist data. 01=Driver, 02=Passenger of vehicle in transport.
+person['Veh_ID'] = as.numeric(paste(person$ST_CASE, person$VEH_NO, sep = "")) #Create the 'Veh_ID' by combining 'ST_CASE' & 'VEH_NO'
+person['Person_ID'] = as.numeric(paste(person$Veh_ID, person$PER_NO, sep = "")) #Create the 'Person_ID' by combining 'Veh_ID' & 'PER_NO'
+summary(person)
+p_drivers = person[ person$PER_TYP==1 , c("Veh_ID", "Person_ID" ,"AGE" ,"SEX",'DOA','AIR_BAG' )] #Driver's type is 1.
+
+p_drivers = p_drivers %>%
+  mutate( Driver_Died =ifelse(p_drivers$DOA %in% c(7,8), 1,0)) %>% #Check if the driver was died. = 1
+  mutate(Air_Bag_Deployed = ifelse(p_drivers$AIR_BAG %in% c(1:9), 1,0))#Check if air bag deployed 1-9 = did open =1, otherwise =0.
+
+p_drivers = p_drivers[ ,c(1:4,7:8)] #remove DOA & AIR_BAG.
+
+
+df_v_vi_f_a_d_m_p = merge(x=df_v_vi_f_a_d_m, y=p_drivers, by = 'Veh_ID', all.x=T) #Left joined tables
+df_v_vi_f_a_d_m_p = distinct(df_v_vi_f_a_d_m_p) #Remove any redandant rows.
+tail(df_v_vi_f_a_d_m_p,3)
+str(df_v_vi_f_a_d_m_p) #51872 obs. of  141 variables.
+
+
+table(person$DOA) #will calculate the total death were in the cars
+ppl_death = person %>%
+  mutate(Died_atScene=ifelse(person$DOA%in% c(7),1,0))%>%
+  mutate(Died_enRout=ifelse(person$DOA%in% c(8),1,0))
+names(ppl_death)
+ppl_death = ppl_death[, c('Veh_ID', 'Died_atScene', 'Died_enRout')]
+ppl_death[ , c('Veh_ID', 'Died_atScene', 'Died_enRout')]
+ppl_death['death_person'] = ppl_death$Died_atScene + ppl_death$Died_enRout
+table(ppl_death['death_person']) #people either died or not.
+
+ppl_death_veh = ppl_death %>% #the list for total death for every cars.
+  group_by(Veh_ID)%>%
+  summarise(total_death=n())
+table(ppl_death_veh$total_death) #up to 47 deaths.
+
+df_v_vi_f_a_d_m_p2 = merge(x=df_v_vi_f_a_d_m_p, y=ppl_death_veh, by = 'Veh_ID', all.x=T) #Left joined tables
+df_v_vi_f_a_d_m_p2 = distinct(df_v_vi_f_a_d_m_p2)
+names(df_v_vi_f_a_d_m_p2)
+df_v_vi_f_a_d_m_p2$VE_FORMS.y=NULL
+df_v_vi_f_a_d_m_p2$MAN_COLL.y=NULL
+df_v_vi_f_a_d_m_p2$Person_ID=NULL
+df_v_vi_f_a_d_m_p2$HARM_EV.y=NULL
+
+str(df_v_vi_f_a_d_m_p2) #51872 obs. of  138 variables..
+
+df_raw = df_v_vi_f_a_d_m_p2
+
+names(df_raw)
+
+#calculating how much cars were speeding
+df_raw = df_raw %>%
+  mutate(Veh_over_sp = ifelse(df_raw$TRAV_SP==997,100, #997 = speed greater than 151 mph. Only keep records with speed on file.
+                              ifelse(df_raw$TRAV_SP>997,0,
+                                     ifelse(df_raw$TRAV_SP>df_raw$VSPD_LIM, df_raw$TRAV_SP-df_raw$VSPD_LIM , 0)))) #check if the car was over speeding.
+
+df_raw = df_raw %>%
+  mutate(Veh_over_sp_per=ifelse(df_raw$TRAV_SP>997,0,
+                                ifelse(df_raw$TRAV_SP>997,0,round(df_raw$TRAV_SP/df_raw$VSPD_LIM,2)*100))) #add new column for over spd%.
+
+df_raw['Female'] = as.numeric(df_raw$SEX)-1
+df_raw$Person_ID=NULL
+
+#Create some binary variables and to create new data set
+df_raw1 = df_raw %>%  #create binary varialbes for Initial Contact Point = IMPACT1 ####
+mutate(IMPACT_Clock = ifelse( IMPACT1 %in% c(1:12), 1,0)) %>%
+  mutate(IMPACT_top = ifelse( IMPACT1 %in% c(13), 1,0)) %>%
+  mutate(IMPACT_cargo = ifelse( IMPACT1 %in% c(18), 1,0)) %>%
+  mutate(IMPACT_left = ifelse( IMPACT1 %in% c(61:63), 1,0)) %>%
+  mutate(IMPACT_right = ifelse( IMPACT1 %in% c(81:83), 1,0)) %>%
+  mutate(IMPACT_front = ifelse( IMPACT1 %in% c(62,82), 1,0)) %>%
+  mutate(IMPACT_back = ifelse( IMPACT1 %in% c(63,83), 1,0))
+
+df_raw1 = df_raw1%>%  #create binary variables for accident typs = ACC_TYPE ####
+mutate(Single_Drive = ifelse( ACC_TYPE %in% c(1:16), 1,0)) %>%
+  mutate(Same_Direction = ifelse( ACC_TYPE %in% c(20:49), 1,0)) %>%
+  mutate(Opposite_Direction = ifelse( ACC_TYPE %in% c(50:67), 1,0)) %>%
+  mutate(Turning = ifelse( ACC_TYPE %in% c(68:85), 1,0)) %>%
+  mutate(Intersecting_Paths = ifelse( ACC_TYPE %in% c(86:91), 1,0))
+       
+df_raw1 = df_raw1%>%  #create binary varialbes for different body types = BODY_TYP ####
+  mutate(Passenger_cars = ifelse( BODY_TYP %in% c(01:11,17), 1,0)) %>%
+  mutate(Motorcycle = ifelse( BODY_TYP %in% c(80:89), 1,0)) %>%
+  mutate(Pickups = ifelse( BODY_TYP %in% c(30:39), 1,0)) %>%
+  mutate(Vans = ifelse( BODY_TYP %in% c(20:22, 24,25,28,29), 1,0)) %>%
+  mutate(Trucks = ifelse( BODY_TYP %in% c(60:79), 1,0))
+
+df_raw1 = df_raw1%>%  #create binary varialbes for weather types = WEATHER2 ####
+  mutate(Weather_Clear = ifelse( WEATHER2 %in% c(1), 1,0)) %>%
+  mutate(Weather_Rain = ifelse( WEATHER2 %in% c(2), 1,0)) %>%
+  mutate(Weather_Sleet = ifelse( WEATHER2 %in% c(3), 1,0)) %>%
+  mutate(Weather_Snow = ifelse( WEATHER2 %in% c(4), 1,0)) %>%
+  mutate(Weather_Fog = ifelse( WEATHER2 %in% c(5), 1,0)) %>%
+  mutate(Weather_Crosswinds = ifelse( WEATHER2 %in% c(6), 1,0)) %>%
+  mutate(Weather_Blowing_sand_dirt = ifelse( WEATHER2 %in% c(7), 1,0)) %>%
+  mutate(Weather_Blowing_snow = ifelse( WEATHER2 %in% c(11), 1,0))
+
+df_raw1 = df_raw1%>%  #create binary varialbes for hours = HOUR ####
+  mutate(Morning = ifelse( HOUR %in% c(4:11), 1,0)) %>%
+  mutate(Afternoon = ifelse( HOUR %in% c(12:18), 1,0)) %>%
+  mutate(Night = ifelse( HOUR %in% c(19:21), 1,0)) %>%
+  mutate(LateNight = ifelse( HOUR %in% c(0:3, 22:23 ), 1,0))
+ 
+df_raw1 = df_raw1%>%  #create binary varialbes for OWNER types
+  mutate(DriverOwned = ifelse( OWNER %in% c(1), 1,0)) %>%
+  mutate(Not_DriverOwned = ifelse( OWNER %in% c(2), 1,0)) %>%
+  mutate(Company_GovOwned = ifelse( OWNER %in% c(3), 1,0)) %>%
+  mutate(Rental = ifelse( OWNER %in% c(4), 1,0)) %>%
+  mutate(StolenCar = ifelse( OWNER %in% c(5), 1,0))
+
+df_raw1$HAZ_INV = as.numeric(df_raw1$HAZ_INV)-1
+df_raw1$HAZ_PLAC = as.numeric(df_raw1$HAZ_PLAC)-1
+
+table(df_raw1$NUMOCCS)
+table(df_raw1$Vans)
+
+max(df_raw1[ ,df_raw1$Vans==1])
+#df_raw11 = df_raw1 with filters
+df_raw11 = df_raw1 %>% #filter out NA data
+  filter(Driver_Died>=0)%>%
+  filter(AGE<99)%>%
+  filter(REL_ROAD<99)%>%
+  filter(WEATHER2<99)%>%
+  filter(NUMOCCS<=96) %>%
+  filter(HOUR<99) %>%
+  filter(NUMOCCS<99) %>%
+  filter(SPEEDREL<=4) %>%
+  filter(OWNER<9) %>%
+  filter(Veh_over_sp_per>=0) %>%
+  filter(HOSP_HR<=23) %>%
+  filter(LAST_YR<9998) %>%
+  filter(VE_FORMS.x<95) %>%
+  filter(MOD_YEAR<=2019) %>%
+  filter(NOT_MIN<99) %>%
+  filter(TRAV_SP<=997)
+
+#
+# There are four vehicle type, the biggest is the Vans
+# So find out the max. people reported for Vans
+df_raw11 %>%
+  group_by(Vans)%>%
+  summarise( sum(NUMOCCS), max(NUMOCCS))
+# `max(NUMOCCS)` for Vans is 12
+#so filter out NUMOCCS>12.
+df_raw11 = df_raw11 %>% 
+  filter(NUMOCCS<=12)
+
+nrow(df_raw11) #4362 rows left.
+
+names(df_raw11)
+#
+#
+#
+#
+#
+#
+#
+# Multiple linear Regression part to predict the deaths in a single car
+#
+#
+# Creating a dataset for lm regression
+df_reg_raw = df_raw11[ , c(5:6,17:24, 27, 35, 66:68, 88:98, 117, 122,125, 130:134, 136:175)] #remove some columns do not make sense for lm regression.
+
+#Adding dummy variables
+weekday = dummy(df_reg_raw$DAY_WEEK) #Create dummy variables for weekdays
+head(weekday)
+
+speedrelated = dummy(df_reg_raw$SPEEDREL) #Create dummy variables for speeding record
+head(speedrelated)
+names(speedrelated)=c('NoSpeeding', 'Racing','OverSpeeding','TooFast')
+
+df_reg_raw = cbind(df_reg_raw, weekday, speedrelated)
+
+# adding 1 quaderic variables:
+df_reg_raw['Veh_over_sp_sqd'] = round(df_reg_raw$Veh_over_sp^2,3)
+
+# Double Check: 
+#Removing some variables not fit for lm, or already have dummy variables.
+df_reg_raw$Total_People=NULL #Make sure there is no Total_People, was created by mistake.
+df_reg_raw$BODY_TYP=NULL
+df_reg_raw$J_KNIFE=NULL
+df_reg_raw$WEATHER2=NULL
+df_reg_raw$ACC_TYP=NULL
+df_reg_raw$DEFORMED=NULL
+df_reg_raw$MAK_MOD=NULL
+df_reg_raw$MODEL=NULL
+df_reg_raw$MAKE=NULL
+df_reg_raw$Veh_ID=NULL
+df_reg_raw$FATALS=NULL
+df_reg_raw$DEATHS=NULL
+df_reg_raw$STATE=NULL
+df_reg_raw$UNDERIDE=NULL
+df_reg_raw$PERMVIT=NULL
+df_reg_raw$GVWR=NULL
+df_reg_raw$TOW_VEH=NULL
+df_reg_raw$PERSONS=NULL
+#
+
+str(df_reg_raw) #4362 obs. of  74 variables.
+#
+#
+df_reg1 = df_reg_raw
+#
+df_reg1$Driver_Died=NULL # remove the driver-died
+
+str(df_reg1) #4362 obs. of  73 variables
+#
+# NA check
+which(is.na(df_reg1))
+which(is.finite(df_reg1))
+df_reg1 = df_reg1[!is.infinite(rowSums(df_reg1)),] #remove infinite values..
+#
+df_reg1 %>%
+  summarise_all(~sum(is.na(.))) #no NAs.
+#
+any(df_reg1$NUMOCCS<df_reg1$total_death)
+# Check if more death than people which means invalid data
+# No
+#
+#
+#
+#
+#
+# Now starting with all-in model
+#
+table(df_reg1$NUMOCCS) #Max is 12.
+table(df_reg1$total_death) #total_death is the Y. Max is 12.
+
+plot(df_reg1$NUMOCCS, df_reg1$total_death)
+boxplot(df_reg1$total_death)
+#
+#
+#   Checking correlation
+head(sort(abs(cor(df_reg1))[ , 'total_death'], decreasing = T), 15)
+#   Only 1 variables have significant correlation:
+#   NUMOCCS has >30% correlation  ~= 100%
+#   lm regression with all variables regardless the IDs and states.
+#
+reg1_allin = lm(total_death~., data = df_reg1, na.action = na.exclude)
+summary(reg1_allin) # Multiple R-squared:  0.9954,	Adjusted R-squared:  0.9954
+# Very high RSQ model
+# But there is a highly correlated variable
+#
+
+reg1_allin1_noNUM = lm(total_death~.-NUMOCCS, data = df_reg1, na.action = na.exclude)
+summary(reg1_allin1_noNUM) # Multiple R-squared:  0.1233,	Adjusted R-squared:  0.1102
+# Very low RSQ, which is an issues. 
+# However, will keep going with NUMOCCS to finish the linear modeling
+#
+#
+sum_allin1 = summary(reg1_allin)
+#
+#   Checking if the death is a normal distribution.
+qqPlot(reg1_allin, method='identify',simulate = TRUE,labels=row.names(df_reg1),main='Q-Q plot')
+
+#   It is not a normal distribution
+#
+durbinWatsonTest(reg1_allin)
+#   p = 0.64 
+#   Test statistic value of 0: Perfect positive autocorrelation.
+#   Alternative hypothesis: rho != 0, its not autocorelated.
+#
+#
+#  Start with displaying the significant variables
+#    That is, P-values less than 0.05
+nrow(sum_allin1$coefficients[sum_allin1$coefficients[,4]<0.05,0]) #9 variables
+
+sum_allin1$coefficients[sum_allin1$coefficients[,4]<0.05,0]
+#   Now use stepwise modeling 'leaps' with variables are significant plus the three factors
+#    Veh_over_sp + Veh_over_sp_per + Veh_over_sp_sqd
+#   in the all_in lm model.
+reg1_full_subsets = regsubsets(total_death~NUMOCCS+Vehicle_Issue+NOT_MIN+Intersecting_Paths+
+                               Passenger_cars+Pickups+Vans+Trucks+            
+                               Company_GovOwned+Veh_over_sp+Veh_over_sp_per+Veh_over_sp_sqd
+                                 , data = df_reg1, really.big=T)
+summary(reg1_full_subsets) 
+# 12 Variables  (and intercept)
+# 1 subsets of each size up to 8
+#
+#
+# checking RSQ:
+summary(reg1_full_subsets)$rsq
+plot(summary(reg1_full_subsets)$rsq)
+which.max(summary(reg1_full_subsets)$rsq) #Highest RSQ = 8
+#
+#Checking AdjRSQ, CP and BIC:
+plot(summary(reg1_full_subsets)$adjr)
+which.max(summary(reg1_full_subsets)$adjr) #Highest AdjRSQ @ 8 variables.
+
+plot(summary(reg1_full_subsets)$cp)
+which.min(summary(reg1_full_subsets)$cp) #Lowest CP @ 8 variables.
+
+plot(summary(reg1_full_subsets)$bic)
+which.min(summary(reg1_full_subsets)$bic) #Lowest BIC @ 6 variables.
+#
+#
+plot(reg1_full_subsets$rss,xlab="Number of Variables",ylab="RSS",type = "l") 
+#
+par(mfrow=c(2,2))
+plot(reg1_full_subsets,scale = "r2") 
+plot(reg1_full_subsets, scale = "adjr2")
+plot(reg1_full_subsets,scale = "Cp")
+plot(reg1_full_subsets,scale = "bic")
+#
+#
+#So 8 or 6 variables should be good?
+#   Veh_over_sp + Veh_over_sp_per + Veh_over_sp_sqd  none of those is a good predictor?
+sort(names(coef(reg1_full_subsets, 6)))
+sort(names(coef(reg1_full_subsets, 8)))
+#  The difference are the "Pickups" & "Vehicle_Issue"
+#
+#
+#
+#  checking forward and backward stepwise modeling
+
+# Forward
+reg1_fwd = regsubsets(total_death~NUMOCCS+Vehicle_Issue+NOT_MIN+Intersecting_Paths+
+                        Passenger_cars+Pickups+Vans+Trucks+            
+                        Company_GovOwned+Veh_over_sp+Veh_over_sp_per+Veh_over_sp_sqd
+                      ,data = df_reg1, nvmax = 10, really.big=T, method = 'forward')
+
+sum_reg1_fwd = summary(reg1_fwd)
+
+# Backward
+reg1_bkd = regsubsets(total_death~NUMOCCS+Vehicle_Issue+NOT_MIN+Intersecting_Paths+
+                        Passenger_cars+Pickups+Vans+Trucks+            
+                        Company_GovOwned+Veh_over_sp+Veh_over_sp_per+Veh_over_sp_sqd
+                      ,data = df_reg1, nvmax = 10, really.big=T, method = 'backward')
+
+sum_reg1_bkd = summary(reg1_bkd)
+#
+
+which(sort(names(coef(reg1_fwd, 6))) != sort(names(coef(reg1_bkd, 6))))
+# Same variables
+
+which(sort(names(coef(reg1_fwd, 8))) != sort(names(coef(reg1_bkd, 8))))
+# Same variables.
+#
+sort(names(coef(reg1_full_subsets, 6)))
+sort(names(coef(reg1_fwd, 6)))
+sort(names(coef(reg1_bkd, 6)))
+# Same 6-varialbe models.
+#
+sort(names(coef(reg1_full_subsets, 8)))
+sort(names(coef(reg1_fwd, 8)))
+sort(names(coef(reg1_bkd, 8)))
+# Same 8-variable models.
+#
+#  subsets full and forward methods have the same variables
+#  Veh_over_sp / Veh_over_sp_per / Veh_over_sp_sqd  none of those is a good predictor?
+#
+reg1_6v = lm(total_death~Company_GovOwned+Intersecting_Paths+NOT_MIN+
+              NUMOCCS+Trucks+Vehicle_Issue
+             ,data = df_reg1, na.action = na.exclude)
+
+summary(reg1_6v) # Multiple R-squared:  0.995,	Adjusted R-squared:  0.995
+#  Very good RSQ, didn't drop much.
+#
+#
+reg1_8v = lm(total_death~Company_GovOwned+Intersecting_Paths+NOT_MIN+           
+              NUMOCCS+Pickups+Trucks+Vans+Vehicle_Issue
+             ,data = df_reg1, na.action = na.exclude)
+
+summary(reg1_8v) # Multiple R-squared:  0.995,	Adjusted R-squared:  0.995
+#  Very good RSQ, didn't drop much.
+#
+#
+# Adding the Veh_over_sp + Veh_over_sp_per + Veh_over_sp_sqd into the 8-variable model
+reg1_11v = lm(total_death~Company_GovOwned+Intersecting_Paths+NOT_MIN+           
+                NUMOCCS+Pickups+Trucks+Vans+Vehicle_Issue+
+              Veh_over_sp+Veh_over_sp_per+Veh_over_sp_sqd, data = df_reg1, na.action = na.exclude)
+
+summary(reg1_11v) # Multiple R-squared:  0.995,	Adjusted R-squared:  0.995
+#
+#
+
+
+anova(reg1_11v,reg1_allin)
+#H0: both models are the same
+#Ha: Model with more variables is better
+#Since P = 1 is not small enough to reject H0, 
+# we should choose the smaller model (reg1_11v)
+
+
+anova(reg1_6v,reg1_allin)
+#H0: both models are the same
+#Ha: Model with more variables is better
+#Since P = 1 is not small enough to reject H0, 
+# we should choose the smaller model (reg1_6v)
+
+
+anova(reg1_8v,reg1_allin)
+#H0: both models are the same
+#Ha: Model with more variables is better
+#Since P = 1 is not small enough to reject H0, 
+# we should choose the smaller model (reg1_8v)
+
+
+anova(reg1_6v,reg1_8v)
+#H0: both models are the same
+#Ha: Model with more variables is better
+#Since P = 0.2 is not small enough to reject H0, 
+# we should choose the smaller model (reg1_6v)
+#
+#
+#
+AIC(reg1_allin) #[1] -10779
+AIC(reg1_6v) #   [1] -10868
+AIC(reg1_8v) #   [1] -10868
+AIC(reg1_11v) #  [1] -10863
+#
+# 6-variable model has smallest AIC as well.
+#
+#
+BIC(reg1_allin) #[1] -10352
+BIC(reg1_6v) #   [1] -10817
+BIC(reg1_8v) #   [1] -10804
+BIC(reg1_11v) #  [1] -10780
+#
+# 6-variable model has smallest BIC as well.
+#
+#
+sum_reg1_6v = summary(reg1_6v)
+sort(round(abs(coef(reg1_6v)),5), decreasing = T)
+#
+#
+#
+table(df_reg1$total_death)
+dev.off()
+#
+#   Creating K-fold cross-validation with package DAAG:
+#   There are three models:
+#
+#    Running 5-fold cv:
+cv.lm(data = df_reg1, form.lm=formula(reg1_6v), seed = 645987, m = 5, plotit = 'Residual')
+# Overall (Sum over all 867 folds)  
+# ms = 0.00486 
+
+cv.lm(data = df_reg1, form.lm=formula(reg1_8v), seed = 645987, m = 5, plotit = 'Residual')
+# Overall (Sum over all 867 folds) 
+# ms = 0.00486
+#
+
+cv.lm(data = df_reg1, form.lm=formula(reg1_11v), seed = 645987, m = 5, plotit = 'Residual')
+# Overall (Sum over all 867 folds) 
+# ms = 0.00486
+#
+# They are close.
+#
+#
+#
+#    Running 10-fold cv:
+cv.lm(data = df_reg1, form.lm=formula(reg1_6v), seed = 987645, m = 10, plotit = 'Residual')
+# Overall (Sum over all 433 folds)
+# ms = 0.00486
+
+cv.lm(data = df_reg1, form.lm=formula(reg1_8v), seed = 987645, m = 10, plotit = 'Residual')
+# Overall (Sum over all 433 folds) 
+# ms = 0.00486
+
+cv.lm(data = df_reg1, form.lm=formula(reg1_11v), seed = 987645, m = 10, plotit = 'Residual')
+# Overall (Sum over all 433 folds) 
+# ms = 0.00486
+#
+#  They are close.
+#
+#
+#   So far, the 6-variable model is the best one.
+#
+sum_reg1_6v
+as.data.frame(sum_reg1_6v$coefficients[ ,1])
+
+# Company_GovOwned = If the car was registered under company/business/government'name
+# Intersecting_Paths = The accident type was recorded as Intersecting Paths (Vehicle Damage)
+# NOT_MIN = The minutes after that emergency medical
+# NUMOCCS = The count of the number of occupants in this vehicle.            
+# Trucks = The body type of the car is Truck.         
+# Vehicle_Issue = If vehicle recorded with existing issues.
+
+as.data.frame(sort(sum_reg1_6v$coefficients[,4])) 
+#NUMOCCS is the most significant variable
+
+as.data.frame(sort(abs(sum_reg1_6v$coefficients[,1]), decreasing = T)) 
+#NUMOCCS has the most powerful impact
+#
+#
+#   Surprisingly, speeding is not a critical factor here.
+#   We noticed that the number of occupants is the dominating factor
+#   Which is not surprising, more people in the car, more deaths could occur.
+#   However, notice minute is a significant variable, but notice hour is not.
+#   So, next is to normalize the number of occupants in car, to calculate the
+#   death rate.  ===> total death / number of occupants
+#
+#
+#   Create a new column to calculate the death rate ===> total death / number of occupants
+#
+str(df_reg1) #4338 obs. of  73 variables
+df_reg2 = df_reg1
+df_reg2['Death_rate'] = round(df_reg2$total_death / df_reg2$NUMOCCS, 5) * 100
+
+table(df_reg2$Death_rate)
+boxplot(df_reg2$Death_rat)
+boxplot(df_reg2$Death_rat)$conf
+#  Well, the range is 100,100. It is not a good data set.
+
+df_reg2$total_death = NULL
+df_reg2$NUMOCCS = NULL
+
+str(df_reg2) #4338 obs. of  72 variables.
+#  So same rows, add one column, remove two columns.
+#
+#   Checking correlation
+head(sort(abs(cor(df_reg2))[ , 'Death_rate'], decreasing = T), 15)
+#   No variables have significant correlation
+#
+#
+reg2_allin = lm(Death_rate~., data = df_reg2, na.action = na.exclude)
+summary(reg2_allin) #Multiple R-squared:  0.0193,	Adjusted R-squared:  0.00458
+# Not a good model, since there are too many outliners.
+#
+# So removing those outlines and try again
+
+boxplot(df_reg2$Death_rate)$out
+boxplot(df_reg2$Death_rate)$conf
+# However, in this case, the death rate is 100%.
+# 
+#  Well, the range is 100,100. It is not a good data set.
+#  Which does not makes sense to predict.
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#  Now make a logistic regression model to predict the death of the driver
+#
+str(df_reg_raw) #4362 obs. of  74 variables.
+#
+
+df_lgreg1 = df_reg_raw
+#
+df_lgreg1$total_death=NULL
+
+str(df_lgreg1) #4362 obs. of  73 variables.
+boxplot(df_lgreg1$Veh_over_sp_per)
+#
+# NA check
+which(is.na(df_lgreg1))
+which(is.finite(df_lgreg1))
+df_lgreg1 = df_lgreg1[!is.infinite(rowSums(df_lgreg1)),] #remove infinite values..
+#
+df_lgreg1 %>%
+  summarise_all(~sum(is.na(.))) #no NAs.
+#
+str(df_lgreg1) #4338 obs. of  73 variables.
+#
+table(df_lgreg1$Driver_Died)
+#   0    1 
+#3800  538
+#
+#  Create a 50/50 training set
+#
+set.seed(6356)
+538/2 #269
+
+df_died = df_lgreg1[df_lgreg1$Driver_Died == 1,]
+df_notd = df_lgreg1[df_lgreg1$Driver_Died == 0,]
+train_died = sample(538, 269)
+train_notd = sample(3800, 269)
+#
+
+df_lgreg_train = rbind(df_died[train_died,],df_notd[train_notd,])
+#
+#
+#  Create a test data set similar to the training set
+#
+df_notd_notsel = df_notd[-train_notd,]
+3800-269 # 3531
+3800/2 # 1900
+
+test_notd = sample(3531, 269)
+df_lgreg_test = rbind(df_died[-train_died,], 
+                      df_notd_notsel[test_notd,])
+#
+#
+nrow(df_died[-train_died,])
+nrow(df_notd_notsel[test_notd,])
+#
+#
+table(df_lgreg1$Driver_Died)/nrow(df_lgreg1)
+#        0         1 
+#0.8759797 0.1240203
+#
+# train data set 50/50
+table(df_lgreg_train$Driver_Died)/nrow(df_lgreg_train)
+#  0   1 
+#0.5 0.5 
+#
+# test data set has 50/50 as well
+table(df_lgreg_test$Driver_Died)/nrow(df_lgreg_test)
+#  0   1 
+#0.5 0.5 
+#
+lr_all_train = glm(Driver_Died ~., data = df_lgreg_train, 
+                   family = "binomial")
+summary(lr_all_train)
+#
+#    Null deviance: 745.83  on 537  degrees of freedom
+#    Residual deviance: 516.83  on 476  degrees of freedom
+#    AIC: 640.83
+#
+#  This regression shows some level of fit as measured
+#    gap between null and residual deviance
+#    There are also quite a few significant variables
+#    indicating some meaningful predictors.  
+#
+#  Start with displaying the significant variables
+#    That is, P-values less than 0.05
+#
+sum_lr_all_train = summary(lr_all_train)
+sum_lr_all_train$coefficients[sum_lr_all_train$coefficients[,4]<0.05,]
+#
+#                   Estimate Std. Error z value Pr(>|z|)
+#TRAV_SP              0.0254    0.00952    2.67 0.007656
+#Driver_Impairment   -1.3719    0.39762   -3.45 0.000560
+#Driver_avoid        -1.3317    0.37572   -3.54 0.000393
+#Same_Direction       1.1966    0.42450    2.82 0.004819
+#Opposite_Direction   1.6454    0.43452    3.79 0.000153
+#Passenger_cars       0.7880    0.31338    2.51 0.011917
+#Trucks              -3.4914    1.19230   -2.93 0.003408
+#
+#  Most, if not all, of the signs of these variables 
+#    make sense.  For example, employees who work 
+#    a lot of overtime are more likely to leave the 
+#    company.  Employees who are divorced are less 
+#    likely to leave.  Is there a reason for that?
+#
+#Trucks=-3.4914
+#  In terms of interpreting the coefficients, the 
+#    slope associated  with Trucks is b = -3.4913
+#
+exp(-3.4914) 
+#[1] 0.0305
+#
+#  Since exp(-3.4914) = 0.0305, one can say that the 
+#    odds of a driver who drives a truck where
+#    (Truck = 1) might have 0.03 times greater chance to die
+#    in a car accident comparing other car types.
+#    Truck is a 'risky' factor for driver's death.
+#
+#
+#Opposite_Direction=1.6454
+exp(1.6454)
+#[1] 5.18
+#
+#  Since exp(1.6454) = 5.18, one can say that the 
+#    odds of a driver who traveling in the opposite direction
+#    (Opposite_Direction = 1) might have 5.18 times greater chance to die
+#    in a car accident comparing others
+#    who didn't travel in the opposite direction. 
+#    Opposite_Direction is a 'risky' factor for driver's death.
+#
+DevRed = 1 - (sum_lr_all_train$deviance/sum_lr_all_train$null.deviance)
+DevRed
+#[1] 0.307
+#
+#  According this measure, the model reduced the 
+#    null deviance by about 30.7%.  
+#    This is not an R-squared measure-so it 
+#    can be not be interpreted as such tho.
+#
+#
+#
+#
+#
+#  Try a simpler version of the logistic regression 
+#    using most of the highly significant variables 
+#    from the "all in" model.
+#
+lr_1_train = glm(Driver_Died ~ TRAV_SP+Driver_Impairment+Driver_avoid+Same_Direction+
+                   Opposite_Direction+Passenger_cars+Trucks, 
+                 data = df_lgreg_train, 
+                 family = "binomial")
+summary(lr_1_train)
+#
+#  Most variables in this logistic regression 
+#    are significant at 5%
+#
+#  Null deviance: 745.83  on 537  degrees of freedom
+#  Residual deviance: 615.19  on 530  degrees of freedom
+#  AIC: 631.19
+#
+sum_lr_1_train = summary(lr_1_train)
+DevRed_1 = 1 - (sum_lr_1_train$deviance/sum_lr_1_train$null.deviance)
+DevRed_1
+#[1] 0.1751509
+DevRed
+#[1] 0.307034
+# It went down.
+#
+#
+#   The Likelihood Ratio Test
+lr_all_train$deviance
+Chisq_teststat = lr_1_train$deviance - lr_all_train$deviance
+Chisq_teststat
+#[1] 98.36187
+#
+df_teststat = lr_1_train$df.residual - lr_all_train$df.residual
+df_teststat
+#[1] 54
+#
+#  The rejection rule is to reject Ho when the chi-squared test 
+#    statistic is large.  
+#
+#  Like all hypothesis tests, a large test statistic 
+#    means bigger than a critical value that can 
+#    be found in a table or using R (or Excel etc)
+#
+#  Set alpha = 0.01, and obtain the critical value 
+#    from R as so:
+#
+qchisq(1-0.01, df_teststat)
+#[1] 81.068
+#  Use 1 - alpha in this calculation as the qchisq 
+#    gives the point at which 1 - alpha (here 81%) 
+#    lies to the left (not the right!)
+#
+#  In this case, the null hypothesis would be
+#     Ho:  All slopes = 0
+#     Ha:  At least one of these 7 slope coefficients is 
+#          different from 0
+#
+#  Essentially, if our test statistic (98.4) is greater 
+#     than the critical value (81.06) we will reject Ho.
+#  
+#  And yes, we reject the HO.
+#  At least one of these 7 slope coefficients is 
+#          different from 0
+#
+#
+anova(lr_1_train, lr_all_train, test = "Chisq")
+# P = 0.0002143 ***.
+# P is small enough to reject Ho.
+# We should use the bigger model with all variables.
+#
+summary(lr_all_train)
+#
+#
+#  Now create the confusion matrix on the training 
+#    data for the "all-In" model
+#
+yhat_all_train = predict(lr_all_train, data = df_lgreg_train, 
+                         type = "response")  
+yhat_all_train[1:20]
+yhat_all_train_cl = ifelse(yhat_all_train > 0.5, 1, 0)
+tab_all_train = table(df_lgreg_train$Driver_Died, yhat_all_train_cl, 
+                      dnn = c("Actual","Predicted"))
+tab_all_train
+tab_all_train_err = mean(yhat_all_train_cl != df_lgreg_train$Driver_Died)
+tab_all_train_err
+#[1] 0.232342
+#
+#
+#  Then create the confusion matrix on the training 
+#    data for model 1
+#
+yhat_1_train = predict(lr_1_train, data = df_lgreg_train, 
+                       type = "response")  
+yhat_1_train[1:20]
+yhat_1_train_cl = ifelse(yhat_1_train > 0.5, 1, 0)
+tab_1_train = table(df_lgreg_train$Driver_Died, yhat_1_train_cl, 
+                    dnn = c("Actual","Predicted"))
+tab_1_train
+tab_1_train_err = mean(yhat_1_train_cl != df_lgreg_train$Driver_Died)
+tab_1_train_err
+#[1] 0.295539
+#
+# Still, the all-in model performances better.
+#
+#
+#
+# Now test the errors with all-in model.
+df_lgreg_train
+df_lgreg_test
+length(df_lgreg_test$Driver_Died)
+length(yhat_all_test_cl)
+#
+yhat_all_test = predict(lr_all_train, data = df_lgreg_test, 
+                        type = "response")  
+length(yhat_all_test)
+nrow(df_lgreg_test)
+yhat_all_test_cl = ifelse(yhat_all_test > 0.5, 1, 0)
+tab_all_test = table(df_lgreg_test$Driver_Died, yhat_all_test_cl, 
+                     dnn = c("Actual","Predicted"))
+tab_all_test
+#       Predicted
+#Actual   0   1
+#     0 199  70
+#     1  55 214
+tab_all_test_err = mean(yhat_all_test_cl != df_lgreg_test$Driver_Died)
+tab_all_test_err
+#[1] 0.232342
+tab_all_train_err
+#[1] 0.232342
+# Same
+#
+# Now test the errors with model 1.
+yhat_1_test = predict(lr_1_train, data = df_lgreg_test, 
+                      type = "response")  
+
+yhat_1_test_cl = ifelse(yhat_1_test > 0.5, 1, 0)
+tab_1_test = table(df_lgreg_test$Driver_Died, yhat_1_test_cl, 
+                   dnn = c("Actual","Predicted"))
+tab_1_test
+#> tab_all_test
+#     Predicted
+#Actual   0   1
+#     0 199  70
+#     1  55 214
+#
+#> tab_1_test
+#     Predicted
+#Actual   0   1
+#     0 192  77
+#     1  82 187
+tab_1_test_err = mean(yhat_1_test_cl != df_lgreg_test$Driver_Died)
+tab_1_test_err
+#[1] 0.295539
+tab_1_train_err
+#[1] 0.295539
+# Same error, stable performance.
+#
+# So we should use the all-in model with less error, 23.23%.
+#
+#
+#
+#
+summarytab = as.data.frame(sum_lr_all_train$coefficients[sum_lr_all_train$coefficients[,4]<0.05, c(1,4)])
+summarytab['Odds%'] = round(exp(summarytab$Estimate),4)*100
+summarytab
+#                   Estimate Pr(>|z|)  Odds%
+#TRAV_SP              0.0254 0.007656 102.57
+#Driver_Impairment   -1.3719 0.000560  25.36
+#Driver_avoid        -1.3317 0.000393  26.40
+#Same_Direction       1.1966 0.004819 330.89
+#Opposite_Direction   1.6454 0.000153 518.28
+#Passenger_cars       0.7880 0.011917 219.90
+#Trucks              -3.4914 0.003408   3.05
+# 
+# As some common sense, Trucks are safer comparing to passenger cars. Drivers should not speed.
+# Driving in opposite direction has very high odds to kill the driver.
