@@ -1,0 +1,617 @@
+import pandas as pd
+import numpy as np
+from matplotlib import pyplot as plt
+from sklearn.cluster import KMeans
+from sklearn import datasets
+from sklearn.preprocessing import LabelEncoder
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+from sklearn.decomposition import PCA
+import matplotlib as mpl
+import seaborn as sns
+from sklearn.preprocessing import StandardScaler
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.naive_bayes import GaussianNB
+from xgboost import XGBClassifier
+from sklearn.tree import DecisionTreeClassifier
+from IPython.display import Image  
+from sklearn.tree import export_graphviz
+from sklearn import model_selection
+from sklearn.utils import class_weight
+from sklearn.metrics import classification_report
+from sklearn.metrics import confusion_matrix
+%matplotlib inline
+
+raw_data = pd.read_csv('C:/Users/melox/Desktop/startup_v1.csv')
+# show first 5 rows, each row corresponds to a single start-up
+df = pd.DataFrame(raw_data)
+df.head()
+
+df.shape
+(48865, 13)
+df.info()
+<class 'pandas.core.frame.DataFrame'>
+RangeIndex: 48865 entries, 0 to 48864
+Data columns (total 13 columns):
+ #   Column                        Non-Null Count  Dtype  
+---  ------                        --------------  -----  
+ 0   id                            48865 non-null  object 
+ 1   acquired                      48865 non-null  int64  
+ 2   category_code                 44940 non-null  object 
+ 3   state_code                    48710 non-null  object 
+ 4   count_offices                 48865 non-null  int64  
+ 5   investment_rounds             48865 non-null  int64  
+ 6   invested_companies            48865 non-null  int64  
+ 7   funding_rounds                48865 non-null  int64  
+ 8   funding_total_usd             48865 non-null  int64  
+ 9   milestone_firstlast_duration  24749 non-null  float64
+ 10  milestones                    48865 non-null  int64  
+ 11  relationships                 48865 non-null  int64  
+ 12  count_investors               48865 non-null  int64  
+dtypes: float64(1), int64(9), object(3)
+memory usage: 4.8+ MB
+# check column 'acquired' levels and counts
+df['acquired'].value_counts(dropna=False)
+0    43892
+1     4973
+Name: acquired, dtype: int64
+# check column 'category_code' levels and counts
+df['category_code'].value_counts(dropna=False)
+
+# This column need to be converted to dummy variables
+software            7193
+web                 5380
+other               4132
+NaN                 3925
+biotech             2846
+ecommerce           2668
+mobile              2456
+advertising         2419
+consulting          1916
+enterprise          1877
+games_video         1855
+hardware            1307
+public_relations    1031
+cleantech            938
+network_hosting      847
+education            835
+health               700
+medical              621
+analytics            566
+search               543
+security             524
+finance              520
+legal                461
+social               412
+semiconductor        370
+manufacturing        308
+hospitality          228
+local                225
+fashion              185
+news                 182
+real_estate          167
+messaging            159
+photo_video          153
+music                148
+sports               145
+travel               143
+nonprofit            126
+transportation       102
+automotive            82
+design                70
+nanotech              46
+pets                  31
+government            23
+Name: category_code, dtype: int64
+# check column 'milestone_firstlast_duration' levels and counts
+df['milestone_firstlast_duration'].value_counts(dropna=False)
+# There are some NAs
+NaN      24116
+0.0      17489
+1.0        280
+7.0        252
+5.0        232
+         ...  
+209.0        1
+211.0        1
+284.0        1
+139.0        1
+182.0        1
+Name: milestone_firstlast_duration, Length: 246, dtype: int64
+# unique levels of categorical features
+df.select_dtypes('object').nunique()
+id               48865
+category_code       42
+state_code          53
+dtype: int64
+#
+# Goal: build a machine learning model that can learn from past investments to predict successful startups
+# We want to find out if invsetments and investors are key factors of success
+#
+1.2 Numberic Features
+# Numeric features
+#
+# retrieve numeric variable names
+num_list = df.select_dtypes('number').columns.tolist()
+num_list.remove('acquired')
+
+# descriptive statistics for numeric variables
+df[num_list].describe()
+
+# funding_total_usd is quite skewed and in a large range, convert to log scale
+df['log_funding_total_usd'] = np.log10(df['funding_total_usd'] + 1)
+df1 = df.drop(columns='funding_total_usd')
+
+# modity num_list
+num_list = [x.replace('funding_total_usd', 'log_funding_total_usd') for x in num_list]
+# A more detailed look of descriptive statistics grouped by success status
+df[['acquired'] + num_list].groupby('acquired').mean()
+count_offices	investment_rounds	invested_companies	funding_rounds	log_funding_total_usd	milestone_firstlast_duration	milestones	relationships	count_investors
+acquired									
+0	1.136722	0.045794	0.042878	0.670441	2.228279	7.559042	0.681833	2.842044	0.964800
+1	1.102152	0.026141	0.022522	0.784637	2.482579	18.636686	1.025739	5.057913	1.894028
+# Define a function for plotting a variable and comparing with investments.
+
+mpl.style.use('ggplot')
+sns.set(style='whitegrid')
+
+def plot_feature(df, col_name, full_name, continuous):
+    """
+    Visualize a variable with and without faceting on the loan status.
+        - df: dataframe
+        - col_name: the column name in the dataframe
+        - full_name: the full variable name
+        - continuous: True if the variable is continuous, False otherwise
+    """
+    
+    # setup plot space
+    f, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=(12, 3), dpi=200)
+    
+    # plots without loan status
+    if continuous:
+        # histogram for distribution
+        sns.distplot(df[col_name].dropna(), kde=False, ax=ax1)
+    else:
+        # categorical count
+        sns.countplot(df[col_name], order=sorted(df[col_name].unique()), color='#5975A4', saturation=1, ax=ax1)
+    ax1.set_xlabel(full_name)
+    ax1.set_ylabel('Count')
+    ax1.set_title(full_name)
+
+    # Plot with loan status
+    if continuous:
+        # box plot
+        sns.boxplot(x=col_name, y='acquired', data=df, ax=ax2)
+        ax2.set_ylabel('')
+        ax2.set_title(full_name + ' by success status')
+    else:
+        # sucessful rate by category
+        us = df.groupby(col_name)['acquired'].value_counts(normalize=True).loc[:,'1']
+        sns.barplot(x=us.index, y=us.values, color='#5975A4', saturation=1, ax=ax2)
+    ax2.set_xlabel(full_name)
+    
+    plt.tight_layout()
+###################################
+### LONG LOADING ###
+
+# REMOVE ALL THESE ###s and the ones from the bottom two rows when ready!
+
+#plot numeric variables 
+for x in num_list:
+    plot_feature(df, x, x, continuous=True)
+
+
+
+
+
+
+
+
+
+num_list
+['count_offices',
+ 'investment_rounds',
+ 'invested_companies',
+ 'funding_rounds',
+ 'log_funding_total_usd',
+ 'milestone_firstlast_duration',
+ 'milestones',
+ 'relationships',
+ 'count_investors']
+1.2.1 Correlation
+# correlation heatmap
+corr = df[num_list].corr()
+plt.figure(figsize=(12, 10))
+sns.heatmap(corr, cmap=sns.diverging_palette(600, 10, as_cmap=True))
+plt.show()
+
+# find highly correlated pairs
+corr.loc[:, :] = np.tril(corr, k=-1)  # below main lower triangle of an array
+corr = corr.stack()
+print(corr[abs(corr > 0.55)])
+invested_companies     investment_rounds    0.999386
+log_funding_total_usd  funding_rounds       0.774143
+count_investors        funding_rounds       0.665952
+dtype: float64
+# Observations:
+# Very high correlation between 'invested companies' and 'investment_rounds'
+# Drop invested companies
+df1 = df1.drop(columns=['invested_companies'])
+num_list.remove('invested_companies')
+df1.head()
+id	acquired	category_code	state_code	count_offices	investment_rounds	funding_rounds	milestone_firstlast_duration	milestones	relationships	count_investors	log_funding_total_usd
+0	c:123717	0	advertising	AL	1	0	0	0.0	1	1	0	0.0
+1	c:164833	0	advertising	AR	1	0	0	0.0	1	4	0	0.0
+2	c:201329	0	advertising	AR	1	0	0	0.0	1	1	0	0.0
+3	c:240249	0	advertising	AR	1	0	0	7.0	2	3	0	0.0
+4	c:255479	0	advertising	AR	1	0	0	NaN	0	0	0	0.0
+1.3 Categorical Features
+# retrieve categorical variable names
+cat_list = df1.select_dtypes('object').columns.tolist()
+cat_list.remove('id')
+
+# descriptive statistics for categorical variables
+df1[cat_list].describe()
+category_code	state_code
+count	44940	48710
+unique	42	53
+top	software	CA
+freq	7193	15681
+df1.shape
+df1.info()
+<class 'pandas.core.frame.DataFrame'>
+RangeIndex: 48865 entries, 0 to 48864
+Data columns (total 12 columns):
+ #   Column                        Non-Null Count  Dtype  
+---  ------                        --------------  -----  
+ 0   id                            48865 non-null  object 
+ 1   acquired                      48865 non-null  int64  
+ 2   category_code                 44940 non-null  object 
+ 3   state_code                    48710 non-null  object 
+ 4   count_offices                 48865 non-null  int64  
+ 5   investment_rounds             48865 non-null  int64  
+ 6   funding_rounds                48865 non-null  int64  
+ 7   milestone_firstlast_duration  24749 non-null  float64
+ 8   milestones                    48865 non-null  int64  
+ 9   relationships                 48865 non-null  int64  
+ 10  count_investors               48865 non-null  int64  
+ 11  log_funding_total_usd         48865 non-null  float64
+dtypes: float64(2), int64(7), object(3)
+memory usage: 4.5+ MB
+1.3.1 Convert response and categorical features
+category_code_dummy = pd.get_dummies(df1['category_code'])
+state_code_dummy = pd.get_dummies(df1['state_code'])
+
+
+df1 = pd.concat((df1, category_code_dummy, state_code_dummy), axis = 1)
+# Remove the original columns: category_code and state_code and first columns of the dummay variables
+df1.drop(['id', 'category_code', 'state_code', 'advertising', 'AK'], axis =1,inplace=True)
+# Drop NAs for this column
+df1.dropna(subset = ['milestone_firstlast_duration'], inplace=True)
+df1=pd.DataFrame(df1)
+df1.shape
+(24749, 102)
+1.4 Data after preparation
+df1.head()
+acquired	count_offices	investment_rounds	funding_rounds	milestone_firstlast_duration	milestones	relationships	count_investors	log_funding_total_usd	analytics	...	TN	TX	UT	United States - Other	VA	VT	WA	WI	WV	WY
+0	0	1	0	0	0.0	1	1	0	0.0	0	...	0	0	0	0	0	0	0	0	0	0
+1	0	1	0	0	0.0	1	4	0	0.0	0	...	0	0	0	0	0	0	0	0	0	0
+2	0	1	0	0	0.0	1	1	0	0.0	0	...	0	0	0	0	0	0	0	0	0	0
+3	0	1	0	0	7.0	2	3	0	0.0	0	...	0	0	0	0	0	0	0	0	0	0
+5	0	3	0	0	0.0	1	6	0	0.0	0	...	0	0	0	0	0	0	0	0	0	0
+5 rows × 102 columns
+
+x = df1.drop(['acquired'],axis='columns')
+x
+count_offices	investment_rounds	funding_rounds	milestone_firstlast_duration	milestones	relationships	count_investors	log_funding_total_usd	analytics	automotive	...	TN	TX	UT	United States - Other	VA	VT	WA	WI	WV	WY
+0	1	0	0	0.0	1	1	0	0.0	0	0	...	0	0	0	0	0	0	0	0	0	0
+1	1	0	0	0.0	1	4	0	0.0	0	0	...	0	0	0	0	0	0	0	0	0	0
+2	1	0	0	0.0	1	1	0	0.0	0	0	...	0	0	0	0	0	0	0	0	0	0
+3	1	0	0	7.0	2	3	0	0.0	0	0	...	0	0	0	0	0	0	0	0	0	0
+5	3	0	0	0.0	1	6	0	0.0	0	0	...	0	0	0	0	0	0	0	0	0	0
+...	...	...	...	...	...	...	...	...	...	...	...	...	...	...	...	...	...	...	...	...	...
+48857	1	0	0	21.0	2	2	0	0.0	0	0	...	0	0	0	0	0	0	0	1	0	0
+48859	1	0	0	0.0	1	1	0	0.0	0	0	...	0	0	0	0	0	0	0	1	0	0
+48861	1	0	0	0.0	1	1	0	0.0	0	0	...	0	0	0	0	0	0	0	1	0	0
+48862	1	0	0	0.0	1	2	0	0.0	0	0	...	0	0	0	0	0	0	0	0	0	1
+48863	1	0	0	0.0	1	1	0	0.0	0	0	...	0	0	0	0	0	0	0	0	0	1
+24749 rows × 101 columns
+
+2. Model assessment and selection
+2.1 Training and Test dataset
+y = df1['acquired']
+# split training and test sets
+train_X, test_X, train_y, test_y = train_test_split(x,y, test_size=0.20)
+scaler = StandardScaler()
+scaler.fit(train_X)
+StandardScaler()
+train_X = scaler.transform(train_X)
+test_X = scaler.transform(test_X)
+2.2 PCA check
+pca = PCA(n_components=5, whiten='True')
+#PCA check
+from sklearn.decomposition import PCA
+pcaa = PCA().fit(df1)
+plt.plot(np.cumsum(pcaa.explained_variance_ratio_))
+plt.xlabel('number of components')
+plt.ylabel('cumulative explained variance');
+
+pca.fit(train_X)
+PCA(n_components=5, whiten='True')
+2.3 Modeling:
+#K-Means Clustering with two clusters
+kmeans = KMeans(n_clusters=2)
+
+#Logistic Regression with no special parameters
+logreg = LogisticRegression()
+
+kmeans.fit(train_X)
+logreg.fit(train_X, train_y)
+LogisticRegression()
+kmeans_pred = kmeans.predict(test_X)
+logreg_pred = logreg.predict(test_X)
+#to help deal with the randomness associated with kmeans, we will evaluate to complements against each other
+kmeans_pred_2 = []
+for x in kmeans_pred:
+    if x == 1:
+        kmeans_pred_2.append(0)
+    elif x == 0:
+        kmeans_pred_2.append(1)
+        
+kmeans_pred_2 = np.array(kmeans_pred_2)
+if accuracy_score(kmeans_pred, test_y, normalize=False) < accuracy_score(kmeans_pred_2, test_y, normalize=False):
+    kmeans_pred = kmeans_pred_2
+#This df will allow us to visualize our results.
+result_df = pd.DataFrame()
+
+#The column containing the correct class for each company in the test set, 'test_y'.
+result_df['test_y'] = np.array(test_y) 
+
+#The predictions made by K-Means on the test set, 'test_X'.
+result_df['kmeans_pred'] = kmeans_pred
+#The column below will tell us whether each prediction made by our K-Means model was correct.
+result_df['kmeans_correct'] = result_df['kmeans_pred'] == result_df['test_y']
+
+#The predictions made by Logistic Regression on the test set, 'test_X'.
+result_df['logreg_pred'] = logreg_pred
+#The column below will tell us whether each prediction made by our Logistic Regression model was correct.
+result_df['logreg_correct'] = result_df['logreg_pred'] == result_df['test_y']
+#map kmeans vs logistic regression for which is more correct
+fig, ax = plt.subplots(1,2)
+plt.subplots_adjust(right=2)
+sns.countplot(x=result_df['kmeans_correct'], order=[True,False], ax=ax[0]).set_title('K-Means Clustering')
+sns.countplot(x=result_df['logreg_correct'], order=[True,False], ax=ax[1]).set_title('Logistic Regression')
+fig.show()
+D:\Software\Anaconda\lib\site-packages\ipykernel_launcher.py:6: UserWarning: Matplotlib is currently using module://ipykernel.pylab.backend_inline, which is a non-GUI backend, so cannot show the figure.
+  
+
+2.4 Algorithm evaluation:
+# Regression vs Random Forest vs K Nearest Neighbor vs SVD vs Gaussian Naive Bayes vs RF XGBoost
+# Precision and recall curves are appropriate for imbalanced data sets
+# Focused on the more important variable: finding the winners (acquired companies) and became very accurate
+# Runs a 5 K-Folds training and test set that has already been modified by PCA
+def run_exps(train_X: pd.DataFrame , train_y: pd.DataFrame, test_X: pd.DataFrame, test_y: pd.DataFrame) -> pd.DataFrame:
+    '''
+    Lightweight script to test many models and find winners
+:param X_train: training split
+    :param y_train: training target vector
+    :param X_test: test split
+    :param y_test: test target vector
+    :return: DataFrame of predictions
+    '''
+    
+    dfs = []
+models = [
+          ('Gaussian Naive Bayes', GaussianNB()),
+          ('Logistic Regression', LogisticRegression()), 
+          ('Random Forest', RandomForestClassifier()),
+          ('K Nearest Neighbors', KNeighborsClassifier()), 
+          ('Decision Tree', DecisionTreeClassifier()),
+          ('RF XGBoost', XGBClassifier())
+        ]
+results = []
+names = []
+scoring = ['accuracy', 'precision_weighted', 'recall_weighted', 'f1_weighted']
+target_names = ['acquired', 'not acquired']
+
+for name, model in models:
+        kfold = model_selection.KFold(n_splits=5, shuffle=True, random_state=90210)
+        cv_results = model_selection.cross_validate(model, train_X, train_y, cv=kfold, scoring=scoring)
+        clf = model.fit(train_X, train_y)
+        y_pred = clf.predict(test_X)
+        print(name)
+        print(classification_report(test_y, y_pred, target_names=target_names))
+results.append(cv_results)
+names.append(name)
+this_df = pd.DataFrame(cv_results)
+this_df['model'] = name
+dfs.append(this_df)
+final = pd.concat(dfs, ignore_index=True)
+return final
+Gaussian Naive Bayes
+              precision    recall  f1-score   support
+
+    acquired       0.95      0.07      0.13      4326
+not acquired       0.13      0.97      0.23       624
+
+    accuracy                           0.18      4950
+   macro avg       0.54      0.52      0.18      4950
+weighted avg       0.85      0.18      0.14      4950
+
+Logistic Regression
+              precision    recall  f1-score   support
+
+    acquired       0.88      1.00      0.93      4326
+not acquired       0.55      0.04      0.07       624
+
+    accuracy                           0.87      4950
+   macro avg       0.71      0.52      0.50      4950
+weighted avg       0.84      0.87      0.82      4950
+
+Random Forest
+              precision    recall  f1-score   support
+
+    acquired       0.88      0.98      0.93      4326
+not acquired       0.40      0.08      0.14       624
+
+    accuracy                           0.87      4950
+   macro avg       0.64      0.53      0.53      4950
+weighted avg       0.82      0.87      0.83      4950
+
+K Nearest Neighbors
+              precision    recall  f1-score   support
+
+    acquired       0.88      0.98      0.93      4326
+not acquired       0.39      0.09      0.15       624
+
+    accuracy                           0.87      4950
+   macro avg       0.64      0.54      0.54      4950
+weighted avg       0.82      0.87      0.83      4950
+
+Decision Tree
+              precision    recall  f1-score   support
+
+    acquired       0.88      0.92      0.90      4326
+not acquired       0.22      0.17      0.19       624
+
+    accuracy                           0.82      4950
+   macro avg       0.55      0.54      0.55      4950
+weighted avg       0.80      0.82      0.81      4950
+
+RF XGBoost
+              precision    recall  f1-score   support
+
+    acquired       0.88      0.99      0.93      4326
+not acquired       0.45      0.08      0.14       624
+
+    accuracy                           0.87      4950
+   macro avg       0.66      0.53      0.54      4950
+weighted avg       0.83      0.87      0.83      4950
+
+---------------------------------------------------------------------------
+NameError                                 Traceback (most recent call last)
+<ipython-input-52-fc960f0e51c0> in <module>
+     34 this_df = pd.DataFrame(cv_results)
+     35 this_df['model'] = name
+---> 36 dfs.append(this_df)
+     37 final = pd.concat(dfs, ignore_index=True)
+     38 return final
+
+NameError: name 'dfs' is not defined
+#component translation: 1st 84.8%, 2nd 9.5%, 3rd 2.6%, 4th 1.85%, 5th 0.07% then drops an order of magnitude
+#this just means our algorithm was very good though, but has little explanatory power
+#Below are the raw results per PC
+explained_variance = pcaa.explained_variance_ratio_
+explained_variance
+array([8.48901477e-01, 9.50230744e-02, 2.61064711e-02, 1.85800108e-02,
+       7.23494599e-03, 7.09432868e-04, 6.69412286e-04, 4.41422918e-04,
+       3.36246119e-04, 1.95707435e-04, 1.47523457e-04, 1.38287070e-04,
+       1.28380514e-04, 8.55597647e-05, 7.86019025e-05, 7.73420129e-05,
+       6.94069782e-05, 6.29789778e-05, 5.75816785e-05, 5.29803733e-05,
+       4.72743438e-05, 4.62897112e-05, 4.41101287e-05, 3.90785381e-05,
+       3.74339049e-05, 2.94925572e-05, 2.93573935e-05, 2.84675630e-05,
+       2.77285368e-05, 2.72436317e-05, 2.58421697e-05, 2.50075962e-05,
+       2.33213584e-05, 2.21593526e-05, 2.10348957e-05, 1.93743071e-05,
+       1.86075001e-05, 1.74769147e-05, 1.72603402e-05, 1.60525111e-05,
+       1.59628291e-05, 1.58857635e-05, 1.52292624e-05, 1.48234460e-05,
+       1.40342260e-05, 1.37764250e-05, 1.34884494e-05, 1.25194665e-05,
+       1.22034074e-05, 1.16412334e-05, 1.14080144e-05, 1.05092302e-05,
+       1.03738530e-05, 9.63239305e-06, 9.28749850e-06, 8.82828248e-06,
+       7.96905743e-06, 7.70792362e-06, 6.75657327e-06, 6.58040890e-06,
+       5.76632643e-06, 5.36071173e-06, 5.29507249e-06, 5.04864632e-06,
+       4.94907713e-06, 4.89857221e-06, 4.85199167e-06, 4.48474295e-06,
+       4.44208603e-06, 4.08898094e-06, 3.98643802e-06, 3.79876213e-06,
+       3.71562611e-06, 3.42701894e-06, 3.24101529e-06, 3.12278132e-06,
+       2.98888746e-06, 2.80968155e-06, 2.59598826e-06, 2.50288033e-06,
+       2.42631619e-06, 2.37644767e-06, 2.33191595e-06, 2.21562721e-06,
+       2.16073311e-06, 2.09444307e-06, 2.08650641e-06, 1.84885203e-06,
+       1.80770147e-06, 1.67472715e-06, 1.56634002e-06, 1.28702979e-06,
+       1.13209403e-06, 1.06615741e-06, 8.01450668e-07, 7.72020146e-07,
+       7.64625274e-07, 6.51853981e-07, 5.61699508e-07, 4.50518114e-07,
+       3.92903023e-07, 8.05979502e-08])
+# original_num_df the original numeric dataframe
+# pca is the model
+def create_importance_dataframe(pcaa, df1):
+
+    # Change pcs components ndarray to a dataframe
+    importance_df  = pd.DataFrame(pcaa.components_)
+
+    # Assign columns
+    importance_df.columns  = df1.columns
+
+    # Change to absolute values
+    importance_df =importance_df.apply(np.abs)
+
+    # Transpose
+    importance_df=importance_df.transpose()
+
+    # Change column names again
+
+    ## First get number of pcs
+    num_pcs = importance_df.shape[1]
+
+    ## Generate the new column names
+    new_columns = [f'PC{i}' for i in range(1, num_pcs + 1)]
+
+    ## Now rename
+    importance_df.columns  =new_columns
+
+    # Return importance df
+    return importance_df
+
+# Call function to create importance df
+importance_df  =create_importance_dataframe(pcaa, df1)
+
+# Show first few rows
+display(importance_df.head())
+
+# Sort depending on PC of interest
+
+## PC1 top important features
+pc1_top_5_features = importance_df['PC1'].sort_values(ascending = False)[:5]
+print(), print(f'PC1 top 5 features are \n')
+display(pc1_top_5_features )
+
+## PC2 top important features
+pc2_top_5_features = importance_df['PC2'].sort_values(ascending = False)[:5]
+print(), print(f'PC2 top 5 features are \n')
+display(pc2_top_5_features )
+
+## PC3 top important features
+pc3_top_5_features = importance_df['PC3'].sort_values(ascending = False)[:5]
+print(), print(f'PC3 top 5 features are \n')
+display(pc3_top_5_features )
+PC1	PC2	PC3	PC4	PC5	PC6	PC7	PC8	PC9	PC10	...	PC93	PC94	PC95	PC96	PC97	PC98	PC99	PC100	PC101	PC102
+acquired	0.001833	0.004385	0.004267	0.001039	0.000312	0.029883	0.002727	0.084628	0.011812	0.095202	...	0.001450	0.000059	0.000433	4.187153e-05	0.001086	0.000856	3.189900e-04	3.946857e-04	2.613115e-04	0.000687
+count_offices	0.001304	0.005973	0.002541	0.000211	0.005489	0.448986	0.892042	0.018909	0.009842	0.029493	...	0.000332	0.000203	0.000009	8.411521e-05	0.000012	0.000190	1.554068e-04	1.216867e-04	1.767550e-05	0.000077
+investment_rounds	0.002862	0.029871	0.030146	0.999080	0.001039	0.001688	0.001006	0.003502	0.000688	0.000011	...	0.000005	0.000013	0.000003	1.296151e-06	0.000003	0.000007	8.867951e-07	9.359968e-07	8.871085e-07	0.000004
+funding_rounds	0.006461	0.054963	0.238022	0.003136	0.107910	0.854081	0.431345	0.082157	0.056866	0.002619	...	0.000794	0.000210	0.000026	9.554891e-05	0.000056	0.000132	6.196405e-05	1.276258e-05	1.921956e-05	0.000008
+milestone_firstlast_duration	0.998453	0.052229	0.012913	0.001734	0.000058	0.002242	0.000344	0.013481	0.002336	0.000991	...	0.000014	0.000008	0.000006	7.582060e-07	0.000019	0.000009	1.728273e-09	2.437003e-07	1.894022e-07	0.000007
+5 rows × 102 columns
+
+PC1 top 5 features are 
+
+milestone_firstlast_duration    0.998453
+relationships                   0.048246
+count_investors                 0.017351
+milestones                      0.015469
+log_funding_total_usd           0.012973
+Name: PC1, dtype: float64
+PC2 top 5 features are 
+
+relationships                   0.977528
+count_investors                 0.155669
+log_funding_total_usd           0.113892
+funding_rounds                  0.054963
+milestone_firstlast_duration    0.052229
+Name: PC2, dtype: float64
+PC3 top 5 features are 
+
+count_investors          0.754538
+log_funding_total_usd    0.574991
+funding_rounds           0.238022
+relationships            0.201285
+milestones               0.037676
+Name: PC3, dtype: float64
